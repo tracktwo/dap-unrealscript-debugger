@@ -1,0 +1,135 @@
+
+syntax = "proto3";
+
+package unreal_debugger.events;
+
+
+// Communication from unreal to the debugger adapter. This is effectively a mapping
+// of the APIs defined in the debugger interface into protobuf messages.
+// See https://docs.unrealengine.com/udk/Three/DebuggerInterface.html#Interface
+
+message ShowDllForm
+{
+}
+
+message BuildHierarchy
+{
+}
+
+message ClearHierarchy
+{
+}
+
+message AddClassToHierarchy
+{
+    string class_name = 1;
+}
+
+message ClearAWatch
+{
+    int32 watch_type = 1;
+}
+
+message AddAWatch
+{
+    int32 watch_type = 1;
+    int32 parent_index = 2;
+    string name = 3;
+    string value = 4;
+    int32 assigned_index = 5;
+}
+
+message LockList
+{
+    int32 watch_type = 1;
+}
+
+message UnlockList
+{
+    int32 watch_type = 1;
+}
+
+message AddBreakpoint
+{
+    string class_name = 1;
+    int32 line_number = 2;
+}
+
+message RemoveBreakpoint
+{
+    string class_name = 1;
+    int32 line_number = 2;
+}
+
+message EditorLoadClass
+{
+    string class_name = 1;
+}
+
+message EditorGotoLine
+{
+    int32 line = 1;
+    bool highlight = 2;
+}
+
+message AddLineToLog
+{
+    string text = 1;
+}
+
+message CallStackClear
+{
+}
+
+message CallStackAdd
+{
+    string entry = 1;
+}
+
+message SetCurrentObjectName
+{
+    string object_name = 1;
+}
+
+message Event
+{
+    enum Kind {
+        Unknown = 0;
+        ShowDllForm = 1;
+        BuildHierarchy = 2;
+        ClearHierarchy = 3;
+        AddClassToHierarchy = 4;
+        ClearAWatch = 5;
+        AddAWatch = 6;
+        LockList = 7;
+        UnlockList = 8;
+        AddBreakpoint = 9;
+        RemoveBreakpoint = 10;
+        EditorLoadClass = 11;
+        EditorGotoLine = 12;
+        AddLineToLog = 13;
+        CallStackClear = 14;
+        CallStackAdd = 15;
+        SetCurrentObjectName = 16;
+    }
+
+    Kind kind = 1;
+    oneof payload {
+        ShowDllForm show_dll_form = 2;
+        BuildHierarchy build_hierarchy = 3;
+        ClearHierarchy clear_hierarchy = 4;
+        AddClassToHierarchy add_class_to_hierarchy = 5;
+        ClearAWatch clear_a_watch = 6;
+        AddAWatch add_a_watch = 7;
+        LockList lock_list = 8;
+        UnlockList unlock_list = 9;
+        AddBreakpoint add_breakpoint = 10;
+        RemoveBreakpoint remove_breakpoint = 11;
+        EditorLoadClass editor_load_class = 12;
+        EditorGotoLine editor_goto_line = 13;
+        AddLineToLog add_line_to_log = 14;
+        CallStackClear call_stack_clear = 15;
+        CallStackAdd call_stack_add = 16;
+        SetCurrentObjectName set_current_object_name = 17;
+    }
+}
