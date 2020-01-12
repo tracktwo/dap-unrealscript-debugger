@@ -4,8 +4,11 @@ cmake_minimum_required(VERSION 3.15)
 project (vscode-unrealscript-debugger C CXX)
 
 # Options
-option(DebuggerInterface_INSTALL "Copy DebuggerInterface.dll to the installation directory on buld" OFF)
+option(DebuggerInterface_INSTALL "Copy DebuggerInterface.dll to the installation directory on build" OFF)
 set(DebuggerInterface_INSTALL_BINDIR "" CACHE STRING "Installation directory for the debugger interface")
+
+option(DebuggerAdapter_INSTALL "Copy the Debugger adapter to the installation directory on build" OFF)
+set(DebuggerAdapter_INSTALL_BINDIR "" CACHE STRING "Installation directory for the debugger adapter")
 
 set (CMAKE_CXX_STANDARD 17)
 string(REGEX REPLACE " /W[0-4]" "" CMAKE_C_FLAGS ${CMAKE_C_FLAGS})
@@ -34,6 +37,8 @@ protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS src/protos/commands.proto src/protos
 
 include_directories("${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/third_party/azmq" "${cppdap_DIR}/include")
 
+
+# The debugger interface project
 set (DBGIFACE_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/interface")
 
 set (DBGIFACE_SRCS
@@ -48,8 +53,34 @@ set (DBGIFACE_HDRS
 )
 
 add_library(DebuggerInterface SHARED ${DBGIFACE_SRCS} ${DBGIFACE_HDRS})
-target_link_libraries(DebuggerInterface PRIVATE protobuf::libprotobuf libzmq-static ${Boost_LIBRARIES} cppdap)
+target_link_libraries(DebuggerInterface PRIVATE protobuf::libprotobuf libzmq-static ${Boost_LIBRARIES})
 
 if (DebuggerInterface_INSTALL)
     install(TARGETS DebuggerInterface RUNTIME DESTINATION "${DebuggerInterface_INSTALL_BINDIR}")
 endif (DebuggerInterface_INSTALL)
+
+# The debug adapter project
+set (DBGADAPTER_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/adapter")
+
+set (DBGADAPTER_SRCS
+    ${DBGADAPTER_SRC_DIR}/adapter.cpp
+    ${DBGADAPTER_SRC_DIR}/client.cpp
+    ${DBGADAPTER_SRC_DIR}/commands.cpp
+    ${DBGADAPTER_SRC_DIR}/debugger.cpp
+    ${PROTO_SRCS}
+)
+
+set (DBGADAPTER_HDRS
+    ${DBGADAPTER_SRC_DIR}/adapter.h
+    ${DBGADAPTER_SRC_DIR}/client.h
+    ${DBGADAPTER_SRC_DIR}/debugger.h
+    ${PROTO_HDRS}
+)
+
+add_executable(DebuggerAdapter ${DBGADAPTER_SRCS} ${DBGADAPTER_HDRS})
+target_compile_options(DebuggerAdapter PRIVATE "-permissive-")
+target_link_libraries(DebuggerAdapter PRIVATE protobuf::libprotobuf libzmq-static ${Boost_LIBRARIES} cppdap)
+
+if (DebuggerAdapter_INSTALL)
+    install(TARGETS DebuggerAdapter RUNTIME DESTINATION "${DebuggerAdapter_INSTALL_BINDIR}")
+endif (DebuggerAdapter_INSTALL)

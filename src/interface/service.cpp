@@ -21,8 +21,9 @@ void DebuggerService::start()
 {
     // TODO Add environment var for port override?
     int port = default_port;
-    addr_ = "tcp://0.0.0.0:" + std::to_string(port);
+    addr_ = "tcp://127.0.0.1:" + std::to_string(port);
     socket_.bind(addr_);
+
     worker_ = std::thread(&DebuggerService::main_loop, this);
 }
 
@@ -41,8 +42,8 @@ void DebuggerService::receive_next_message()
     {
         Lock lock{mu_};
         socket_.async_receive([this](boost::system::error_code& ec, azmq::message& msg, std::size_t len) {
-            Lock lock{mu_};
             {
+                Lock lock{ mu_ };
                 if (ec)
                 {
                     printf("UnrealDebugger: Sending command received error: %s\n", ec.message().c_str());
@@ -87,6 +88,7 @@ void DebuggerService::build_hierarchy()
 
 void DebuggerService::dispatch_command(const Command& cmd)
 {
+    printf("Got command %s\n", Command::Kind_Name(cmd.kind()).c_str());
     switch(cmd.kind())
     {
         case Command::Kind::Command_Kind_AddBreakpoint:
@@ -127,6 +129,7 @@ void DebuggerService::send_event(const Event& msg)
     {
         Lock lock(mu_);
 
+        printf("Sending event %s\n", Event::Kind_Name(msg.kind()).c_str());
         // Serialize the message into a buffer that we can send over the wire.
         std::size_t len = msg.ByteSizeLong();
         std::unique_ptr<char[]> buf = std::make_unique<char[]>(len);
@@ -154,7 +157,7 @@ void DebuggerService::send_next_message()
     assert(!send_queue_.empty());
     auto&& next_msg = send_queue_.front();
 
-    socket_.async_send(asio::buffer(next_msg.buf.get(), next_msg.len), [this, len=next_msg.len](boost::system::error_code ec, std::size_t n) {
+    socket_.async_send(next_msg.buffer, [this, len=next_msg.len](boost::system::error_code ec, std::size_t n) {
 
         bool is_empty = false;
         {

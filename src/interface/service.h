@@ -45,10 +45,11 @@ class DebuggerService
     struct SerializedMessage
     {
         SerializedMessage(std::unique_ptr<char[]> b, size_t l)
-            : buf(std::move(b)), len(l)
+            : bytes(std::move(b)), len(l), buffer{bytes.get(), len}
         {}
-        std::unique_ptr<char[]> buf;
+        std::unique_ptr<char[]> bytes;
         size_t len;
+        boost::asio::const_buffer buffer;
     };
 
     // A queue of serialized messages waiting to be sent.

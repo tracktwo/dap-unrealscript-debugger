@@ -29,14 +29,19 @@ extern "C"
 
     __declspec(dllexport) void ShowDllForm()
     {
+        printf("Show DLL frame\n");
         if (!service)
+        {
             service = std::make_unique<DebuggerService>();
+            service->start();
+        }
 
         service->show_dll_form();
     }
 
     __declspec(dllexport) void BuildHierarchy()
     {
+        printf("BuildHierarchy\n");
         if (service)
             service->build_hierarchy();
     }
@@ -58,11 +63,13 @@ extern "C"
 
     __declspec(dllexport) void ClearAWatch(int kind)
     {
+        printf("ClearAWatch\n");
        // return debugger.clear_watch(static_cast<UnrealDebugger::WatchKind>(kind));
     }
 
     __declspec(dllexport) int AddAWatch(int kind, int parent, const char* name, const char* value)
     {
+        printf("AddAWatch\n");
         return 1;
       //  return debugger.add_watch(static_cast<UnrealDebugger::WatchKind>(kind), parent, name, value);
     }
@@ -89,17 +96,19 @@ extern "C"
 
     __declspec(dllexport) void EditorLoadClass(const char* name)
     {
+        printf("EditorLoadClass\n");
       //  debugger.load_class(name);
     }
 
     __declspec(dllexport) void EditorGotoLine(int linenumber, int)
     {
+        printf("EditorGotoLine\n");
      //   debugger.goto_line(linenumber);
     }
 
-    __declspec(dllexport) void AddLineToLog(const char*)
+    __declspec(dllexport) void AddLineToLog(const char* )
     {
-        //printf("AddLineToLog: %s\n", log);
+       // printf("AddLineToLog: %s\n", log);
     }
 
     __declspec(dllexport) void CallStackClear()
