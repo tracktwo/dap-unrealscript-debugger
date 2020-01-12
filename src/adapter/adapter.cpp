@@ -106,7 +106,6 @@ namespace handlers
 
     dap::DisconnectResponse disconnect(const dap::DisconnectRequest& request)
     {
-        // Ask the 
         return {};
     }
 
@@ -317,6 +316,22 @@ namespace sent_handlers
     }
 }
 
+// Tell the debug client that the debugger is stopped at a breakpoint.
+void breakpoint_hit()
+{
+    dap::StoppedEvent ev;
+    ev.reason = "breakpoint";
+    ev.threadId = unreal_thread_id;
+    session->send(ev);
+}
+
+void console_message(const std::string& msg)
+{
+    dap::OutputEvent ev;
+    ev.output = msg;
+    ev.category = "console";
+}
+
 void create_adapter()
 {
     session = dap::Session::create();
@@ -350,8 +365,9 @@ void create_adapter()
 void on_connect(const std::shared_ptr<dap::ReaderWriter>& streams)
 {
     create_adapter();
-    auto spy = dap::spy(static_cast<std::shared_ptr<dap::Reader>>(streams), log_file);
-    session->bind(spy, static_cast<std::shared_ptr<dap::Writer>>(streams));
+  //  auto spy = dap::spy(static_cast<std::shared_ptr<dap::Reader>>(streams), log_file);
+   // session->bind(spy, static_cast<std::shared_ptr<dap::Writer>>(streams));
+    session->bind(streams);
     term.wait();
 }
 

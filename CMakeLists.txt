@@ -42,7 +42,9 @@ include_directories("${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/t
 set (DBGIFACE_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/interface")
 
 set (DBGIFACE_SRCS
+    ${DBGIFACE_SRC_DIR}/commands.cpp
     ${DBGIFACE_SRC_DIR}/debuggerinterface.cpp
+    ${DBGIFACE_SRC_DIR}/events.cpp
     ${DBGIFACE_SRC_DIR}/service.cpp
     ${PROTO_SRCS}
 )
@@ -67,6 +69,7 @@ set (DBGADAPTER_SRCS
     ${DBGADAPTER_SRC_DIR}/client.cpp
     ${DBGADAPTER_SRC_DIR}/commands.cpp
     ${DBGADAPTER_SRC_DIR}/debugger.cpp
+    ${DBGADAPTER_SRC_DIR}/events.cpp
     ${PROTO_SRCS}
 )
 

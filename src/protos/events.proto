@@ -68,7 +68,7 @@ message EditorLoadClass
 
 message EditorGotoLine
 {
-    int32 line = 1;
+    int32 line_number = 1;
     bool highlight = 2;
 }
 

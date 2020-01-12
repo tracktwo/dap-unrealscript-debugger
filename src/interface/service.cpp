@@ -14,7 +14,8 @@ static const int default_port = 10077;
 
 DebuggerService::DebuggerService() :
     ios_{},
-    socket_{ios_}
+    socket_{ios_},
+    watch_indices_{1, 1, 1}
 {}
 
 void DebuggerService::start()
@@ -43,7 +44,6 @@ void DebuggerService::receive_next_message()
         Lock lock{mu_};
         socket_.async_receive([this](boost::system::error_code& ec, azmq::message& msg, std::size_t len) {
             {
-                Lock lock{ mu_ };
                 if (ec)
                 {
                     printf("UnrealDebugger: Sending command received error: %s\n", ec.message().c_str());
@@ -70,58 +70,9 @@ void DebuggerService::main_loop()
     ios_.run();
 }
 
-void DebuggerService::show_dll_form()
-{
-    Event ev;
-    ev.set_kind(Event::Kind::Event_Kind_ShowDllForm);
-    *(ev.mutable_show_dll_form()) = {};
-    this->send_event(ev);
-}
-
-void DebuggerService::build_hierarchy()
-{
-    Event ev;
-    ev.set_kind(Event::Kind::Event_Kind_BuildHierarchy);
-    *(ev.mutable_build_hierarchy()) = {};
-    this->send_event(ev);
-}
-
-void DebuggerService::dispatch_command(const Command& cmd)
-{
-    printf("Got command %s\n", Command::Kind_Name(cmd.kind()).c_str());
-    switch(cmd.kind())
-    {
-        case Command::Kind::Command_Kind_AddBreakpoint:
-            add_breakpoint(cmd.add_breakpoint());
-            break;
-        /*
-        RemoveBreakpoint = 2;
-        AddWatch = 3;
-        RemoveWatch = 4;
-        ClearWatch = 5;
-        ChangeStack = 6;
-        SetDataWatch = 7;
-        BreakOnNone = 8;
-        Break = 9;
-        StopDebugging = 10;
-        Go = 11;
-        StepInto = 12;
-        StepOver = 13;
-        StepOutOf = 14;
-        */
-    }
-}
-
-void DebuggerService::add_breakpoint(const unreal_debugger::commands::AddBreakpoint& cmd)
-{
-    std::stringstream stream;
-    stream << "addbreakpoint " << cmd.class_name() << " " << cmd.line_number();
-    callback_function(stream.str().c_str());
-}
-
 // Enqueues a message to send to the debugger client. If the queue is
 // currently empty it will also initiate an async send of the message.
-void DebuggerService::send_event(const Event& msg)
+void DebuggerService::send_event(const unreal_debugger::events::Event& msg)
 {
     bool is_empty = false;
 
@@ -129,7 +80,8 @@ void DebuggerService::send_event(const Event& msg)
     {
         Lock lock(mu_);
 
-        printf("Sending event %s\n", Event::Kind_Name(msg.kind()).c_str());
+        if (msg.kind() != unreal_debugger::events::Event_Kind_AddAWatch)
+            printf("Sending event %s\n", unreal_debugger::events::Event::Kind_Name(msg.kind()).c_str());
         // Serialize the message into a buffer that we can send over the wire.
         std::size_t len = msg.ByteSizeLong();
         std::unique_ptr<char[]> buf = std::make_unique<char[]>(len);

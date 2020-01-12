@@ -49,17 +49,6 @@ void receive_next_event()
     }
 }
 
-void dispatch_event(const unreal_debugger::events::Event& ev)
-{
-    using namespace unreal_debugger::events;
-
-    switch (ev.kind())
-    {
-    default:
-        dap::writef(log_file, "got event %s\n", ev.Kind_Name(ev.kind()).c_str());
-    }
-}
-
 void send_next_message()
 {
     std::lock_guard<std::mutex> lock(client_mutex);
@@ -128,7 +117,6 @@ void shutdown()
    // ios.stop();
 }
 
-bool rdy = false;
 int main(int argc, char *argv[])
 {
     bool debug_mode = false;
@@ -138,11 +126,6 @@ int main(int argc, char *argv[])
     if (argc > 1 && strcmp(argv[1], "debug") == 0)
     {
         debug_mode = true;
-    }
-
-    while (!rdy)
-    {
-        Sleep(1000);
     }
 
     sock = std::make_unique<azmq::pair_socket>(ios);
@@ -165,7 +148,7 @@ int main(int argc, char *argv[])
         log_enabled = true;
     }
 
-    dap::writef(log_file, "Started! %s\n");
+    dap::writef(log_file, "Started!\n");
 
     // Connect to the debugger interface
     int port = default_port;
