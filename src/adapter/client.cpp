@@ -3,13 +3,22 @@
 #include "client.h"
 #include "debugger.h"
 #include "adapter.h"
+
 #include <io.h>
 #include <fcntl.h>
+#include <boost/beast/core.hpp>
+#include <boost/beast/websocket.hpp>
 
 static const int default_port = 10077;
 
+namespace asio = boost::asio;
+namespace websocket = boost::beast::websocket;
+using tcp = boost::asio::ip::tcp;
+
 boost::asio::io_context ios;
-std::unique_ptr<azmq::pair_socket> sock;
+std::unique_ptr<websocket::stream<boost::beast::tcp_stream>> sock;
+boost::beast::flat_buffer read_buffer;
+
 std::mutex client_mutex;
 Debugger debugger;
 bool log_enabled;
@@ -22,7 +31,7 @@ void receive_next_event()
     {
         std::lock_guard<std::mutex> lock{ client_mutex };
 
-        sock->async_receive([](boost::system::error_code& ec, azmq::message& msg, std::size_t len) {
+        sock->async_read(read_buffer, [](const boost::system::error_code& ec, std::size_t len) {
 
             {
                 // Reaquire the lock before dispatching any events.
@@ -34,7 +43,7 @@ void receive_next_event()
                 }
 
                 unreal_debugger::events::Event ev;
-                if (ev.ParseFromArray(msg.data(), msg.size()))
+                if (ev.ParseFromArray(read_buffer.data().data(), len))
                 {
                     dispatch_event(ev);
                 }
@@ -57,7 +66,7 @@ void send_next_message()
     auto&& next_msg = send_queue.front();
 
     // Begin the async send of the front-most message
-    sock->async_send(next_msg.buffer, [len = next_msg.len](boost::system::error_code ec, std::size_t n) {
+    sock->async_write(asio::buffer(next_msg.bytes.get(), next_msg.len), [len = next_msg.len](const boost::system::error_code& ec, std::size_t n) {
         bool is_empty = false;
 
         {
@@ -128,7 +137,7 @@ int main(int argc, char *argv[])
         debug_mode = true;
     }
 
-    sock = std::make_unique<azmq::pair_socket>(ios);
+    // TODO error handling for failed connection
 
     if (debug_mode)
     {
@@ -150,11 +159,15 @@ int main(int argc, char *argv[])
 
     dap::writef(log_file, "Started!\n");
 
-    // Connect to the debugger interface
-    int port = default_port;
-    std::string addr = "tcp://127.0.0.1:" + std::to_string(port);
-    sock->connect(addr);
+    sock = std::make_unique<websocket::stream<boost::beast::tcp_stream>>(ios);
+    boost::beast::get_lowest_layer(*sock).connect(tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), default_port));
+    boost::beast::error_code ec;
+    sock->handshake("127.0.0.1", "/", ec);
 
+    if (ec)
+    {
+        dap::writef(log_file, "Error during socket handshake: %s\n", ec.message().c_str());
+    }
 
    // create_adapter();
     if (debug_mode)
@@ -186,3 +199,4 @@ int main(int argc, char *argv[])
     }
 
 }
+

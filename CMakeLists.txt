@@ -21,8 +21,6 @@ set (Boost_USE_STATIC_LIBS ON)
 find_package(Boost REQUIRED COMPONENTS regex)
 include_directories(${Boost_include_dirs})
 
-find_package(ZeroMQ CONFIG REQUIRED)
-
 # protobuf is also needed
 set (Protobuf_USE_STATIC_LIBS ON)
 find_package(Protobuf REQUIRED)
@@ -35,7 +33,7 @@ add_subdirectory(${cppdap_DIR})
 # Unreal Debugger Interface RPC definition
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS src/protos/commands.proto src/protos/events.proto)
 
-include_directories("${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/third_party/azmq" "${cppdap_DIR}/include")
+include_directories("${CMAKE_CURRENT_BINARY_DIR}" "${cppdap_DIR}/include")
 
 
 # The debugger interface project
@@ -55,7 +53,7 @@ set (DBGIFACE_HDRS
 )
 
 add_library(DebuggerInterface SHARED ${DBGIFACE_SRCS} ${DBGIFACE_HDRS})
-target_link_libraries(DebuggerInterface PRIVATE protobuf::libprotobuf libzmq-static ${Boost_LIBRARIES})
+target_link_libraries(DebuggerInterface PRIVATE protobuf::libprotobuf ${Boost_LIBRARIES})
 
 if (DebuggerInterface_INSTALL)
     install(TARGETS DebuggerInterface RUNTIME DESTINATION "${DebuggerInterface_INSTALL_BINDIR}")
@@ -82,7 +80,7 @@ set (DBGADAPTER_HDRS
 
 add_executable(DebuggerAdapter ${DBGADAPTER_SRCS} ${DBGADAPTER_HDRS})
 target_compile_options(DebuggerAdapter PRIVATE "-permissive-")
-target_link_libraries(DebuggerAdapter PRIVATE protobuf::libprotobuf libzmq-static ${Boost_LIBRARIES} cppdap)
+target_link_libraries(DebuggerAdapter PRIVATE protobuf::libprotobuf ${Boost_LIBRARIES} cppdap)
 
 if (DebuggerAdapter_INSTALL)
     install(TARGETS DebuggerAdapter RUNTIME DESTINATION "${DebuggerAdapter_INSTALL_BINDIR}")

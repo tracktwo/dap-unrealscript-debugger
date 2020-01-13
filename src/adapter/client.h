@@ -2,7 +2,6 @@
 #include <memory>
 #include <deque>
 #include <boost/asio/io_context.hpp>
-#include <azmq/socket.hpp>
 #include "dap/io.h"
 #include "commands.pb.h"
 #include "events.pb.h"
@@ -17,12 +16,11 @@ extern std::shared_ptr<dap::Writer> log_file;
 struct SerializedCommand
 {
     SerializedCommand(std::unique_ptr<char[]> b, size_t l)
-        : bytes(std::move(b)), len(l), buffer{boost::asio::buffer(bytes.get(), len)}
+        : bytes(std::move(b)), len(l)
     {}
 
     std::unique_ptr<char[]> bytes;
     size_t len;
-    boost::asio::const_buffer buffer;
 };
 
 extern std::deque<SerializedCommand> send_queue;

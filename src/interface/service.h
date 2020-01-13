@@ -5,7 +5,8 @@
 #include <memory>
 #include <deque>
 #include <boost/asio/io_context.hpp>
-#include <azmq/socket.hpp>
+#include <boost/beast/core.hpp>
+#include <boost/beast/websocket.hpp>
 
 #include "events.pb.h"
 #include "commands.pb.h"
@@ -76,6 +77,7 @@ private:
     void dispatch_command(const unreal_debugger::commands::Command& cmd);
     void send_next_message();
     void receive_next_message();
+    void accept_connection();
 
     std::thread worker_;
 
@@ -101,16 +103,17 @@ private:
     // the calls from Unreal (writing debugger events).
     std::mutex mu_;
 
-    // The address to which the socket is bound
-    std::string addr_;
+    std::unique_ptr<boost::asio::ip::tcp::acceptor> acceptor_;
 
     // The boost io context for use for all async i/o over the socket
     boost::asio::io_context ios_;
 
-    // The zeromq socket we will communicate over. Debugger/client communication
-    // is tightly paired, so use a PAIR socket. We can't support multiple connections
-    // to a single debug session.
-    azmq::pair_socket socket_;
+
+    std::unique_ptr<boost::beast::websocket::stream<boost::beast::tcp_stream>> socket_;
+
+    boost::beast::flat_buffer read_buffer_;
+
+    bool connected_ = false;
 };
 
 // The callback function back into unreal just takes a simple string argument

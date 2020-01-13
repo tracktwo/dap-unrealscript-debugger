@@ -9,22 +9,19 @@
 std::unique_ptr<DebuggerService> service;
 
 namespace asio = boost::asio;
+namespace websocket = boost::beast::websocket;
+using tcp = boost::asio::ip::tcp;
+
 
 static const int default_port = 10077;
 
 DebuggerService::DebuggerService() :
     ios_{},
-    socket_{ios_},
     watch_indices_{1, 1, 1}
 {}
 
 void DebuggerService::start()
 {
-    // TODO Add environment var for port override?
-    int port = default_port;
-    addr_ = "tcp://127.0.0.1:" + std::to_string(port);
-    socket_.bind(addr_);
-
     worker_ = std::thread(&DebuggerService::main_loop, this);
 }
 
@@ -32,7 +29,7 @@ void DebuggerService::stop()
 {
     // Note that the io_context is documented to be thread-safe. Request a stop and
     // then halt the worker thread.
-    socket_.unbind(addr_);
+  //  socket_.unbind(addr_);
     ios_.stop();
     if (worker_.joinable())
         worker_.join();
@@ -42,31 +39,49 @@ void DebuggerService::receive_next_message()
 {
     {
         Lock lock{mu_};
-        socket_.async_receive([this](boost::system::error_code& ec, azmq::message& msg, std::size_t len) {
+        socket_->async_read(read_buffer_, [this](boost::system::error_code& ec, std::size_t len) {
+            if (ec)
             {
-                if (ec)
-                {
-                    printf("UnrealDebugger: Sending command received error: %s\n", ec.message().c_str());
-                }
+                printf("UnrealDebugger: Sending command received error: %s\n", ec.message().c_str());
+            }
 
-                unreal_debugger::commands::Command cmd;
-                if (cmd.ParseFromArray(msg.data(), msg.size()))
-                {
-                    dispatch_command(cmd);
-                }
-                else
-                {
-                    printf("UnrealDebugger: Failed to parse command.");
-                }
+            unreal_debugger::commands::Command cmd;
+            if (cmd.ParseFromArray(read_buffer_.data().data(), len))
+            {
+                dispatch_command(cmd);
+            }
+            else
+            {
+                printf("UnrealDebugger: Failed to parse command.");
             }
             receive_next_message();
         });
     }
 }
 
+void DebuggerService::accept_connection()
+{
+    acceptor_->async_accept([this](const boost::beast::error_code& ec, tcp::socket socket) {
+
+        // We have a new connection. Create a new websocket from the tcp socket, and start the upgrade handshake.
+        this->socket_ = std::make_unique<websocket::stream<boost::beast::tcp_stream>>(std::move(socket));
+        this->socket_->async_accept([this](boost::beast::error_code& ec) {
+            // We have upgraded to websocket! Queue the first read.
+            this->connected_ = true;
+            this->receive_next_message();
+        });
+    });
+}
+
 void DebuggerService::main_loop()
 {
-    receive_next_message();
+    // TODO Add environment var for port override?
+    int port = default_port;
+
+    acceptor_ = std::make_unique<tcp::acceptor>(ios_, tcp::endpoint(tcp::v4(), port));
+
+    // Queue the next connection
+    accept_connection();
     ios_.run();
 }
 
@@ -75,6 +90,10 @@ void DebuggerService::main_loop()
 void DebuggerService::send_event(const unreal_debugger::events::Event& msg)
 {
     bool is_empty = false;
+
+    // FIXME
+    if (!connected_)
+        return;
 
     // Control the scoping of the lock guard while we access the send queue.
     {
@@ -109,7 +128,7 @@ void DebuggerService::send_next_message()
     assert(!send_queue_.empty());
     auto&& next_msg = send_queue_.front();
 
-    socket_.async_send(next_msg.buffer, [this, len=next_msg.len](boost::system::error_code ec, std::size_t n) {
+    socket_->async_write(next_msg.buffer, [this, len=next_msg.len](boost::system::error_code ec, std::size_t n) {
 
         bool is_empty = false;
         {
