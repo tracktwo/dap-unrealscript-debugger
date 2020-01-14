@@ -13,6 +13,14 @@ namespace client
             throw std::runtime_error("NYI");
         }
 
+        void stop_debugging()
+        {
+            Command cmd;
+            cmd.set_kind(Command_Kind_StopDebugging);
+            cmd.mutable_stop_debugging();
+            send_command(cmd);
+        }
+
         void add_breakpoint(const std::string& class_name, int line)
         {
             AddBreakpoint add_msg;

@@ -19,6 +19,9 @@ struct SerializedCommand
         : bytes(std::move(b)), len(l)
     {}
 
+    SerializedCommand() : bytes{}, len{0}
+    {}
+
     std::unique_ptr<char[]> bytes;
     size_t len;
 };
@@ -45,5 +48,6 @@ namespace client
         void step_over();
         void step_into();
         void step_outof();
+        void stop_debugging();
     }
 }

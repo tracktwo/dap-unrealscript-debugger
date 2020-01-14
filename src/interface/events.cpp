@@ -149,7 +149,7 @@ void DebuggerService::add_line_to_log(const char* text)
 void DebuggerService::call_stack_clear()
 {
     Event ev;
-    ev.set_kind(Event_Kind_AddLineToLog);
+    ev.set_kind(Event_Kind_CallStackClear);
     ev.mutable_call_stack_clear();
     send_event(ev);
 }

@@ -34,137 +34,113 @@ extern "C"
         // break, though.
         static bool is_break = false;
 
-        printf("Show DLL frame\n");
-        if (!service)
+        if (check_service())
         {
-            service = std::make_unique<DebuggerService>();
-            service->start();
-        }
-
-        if (!is_break)
-        {
-            is_break = true;
-        }
-        else
-        {
-            service->show_dll_form();
+            if (!is_break)
+            {
+                is_break = true;
+            }
+            else
+            {
+                service->show_dll_form();
+            }
         }
     }
 
     __declspec(dllexport) void BuildHierarchy()
     {
-        printf("BuildHierarchy\n");
-        if (service)
+        if (check_service())
             service->build_hierarchy();
     }
 
     __declspec(dllexport) void ClearHierarchy()
     {
-        printf("ClearHierarchy\n");
-        if (service)
+        if (check_service())
             service->clear_hierarchy();
     }
 
     __declspec(dllexport) void AddClassToHierarchy(const char* class_name)
     {
-        printf("AddClassToHierarchy %s\n", class_name);
-        if (service)
+        if (check_service())
             service->add_class_to_hierarchy(class_name);
     }
 
     __declspec(dllexport) void ClearWatch(int watch_kind)
     {
-        printf("ClearWatch\n");
-        if (service)
+        if (check_service())
             service->clear_a_watch(watch_kind);
     }
 
     __declspec(dllexport) void ClearAWatch(int watch_kind)
     {
-        printf("ClearAWatch\n");
-        if (service)
+        if (check_service())
             service->clear_a_watch(watch_kind);
-       // return debugger.clear_watch(static_cast<UnrealDebugger::WatchKind>(kind));
     }
 
     __declspec(dllexport) int AddAWatch(int kind, int parent, const char* name, const char* value)
     {
-      //  printf("AddAWatch\n");
-        if (service)
+        if (check_service())
             return service->add_a_watch(kind, parent, name, value);
         return 0;
-      //  return debugger.add_watch(static_cast<UnrealDebugger::WatchKind>(kind), parent, name, value);
     }
 
     __declspec(dllexport) void LockList(int watch_kind)
     {
-        printf("LockList\n");
-        if (service)
+        if (check_service())
             return service->lock_list(watch_kind);
     }
 
     __declspec(dllexport) void UnlockList(int watch_kind)
     {
-        printf("UnlockList\n");
-        if (service)
+        if (check_service())
             return service->unlock_list(watch_kind);
     }
 
     __declspec(dllexport) void AddBreakpoint(const char* class_name, int line_number)
     {
-        printf("AddBreakpoint\n");
-        if (service)
+        if (check_service())
             service->add_breakpoint(class_name, line_number);
     }
 
     __declspec(dllexport) void RemoveBreakpoint(const char* class_name, int line_number)
     {
-        printf("RemoveBreakpoint\n");
-        if (service)
+        if (check_service())
             service->remove_breakpoint(class_name, line_number);
     }
 
     __declspec(dllexport) void EditorLoadClass(const char* class_name)
     {
-        printf("EditorLoadClass\n");
-        if (service)
+        if (check_service())
             service->editor_load_class(class_name);
     }
 
     __declspec(dllexport) void EditorGotoLine(int line_number, int highlight)
     {
-        printf("EditorGotoLine\n");
-        if (service)
+        if (check_service())
             service->editor_goto_line(line_number, highlight);
     }
 
     __declspec(dllexport) void AddLineToLog(const char* text)
     {
-        if (service)
+        if (check_service())
             service->add_line_to_log(text);
-       // printf("AddLineToLog: %s\n", log);
     }
 
     __declspec(dllexport) void CallStackClear()
     {
-        printf("ClearCallStack\n");
-        if (service)
+        if (check_service())
             service->call_stack_clear();
-      //  debugger.clear_callstack();
     }
 
     __declspec(dllexport) void CallStackAdd(const char* entry)
     {
-        printf("CallStackAdd\n");
-        if (service)
+        if (check_service())
             service->call_stack_add(entry);
-     //   debugger.add_callstack(name);
     }
 
     __declspec(dllexport) void SetCurrentObjectName(const char* object_name)
     {
-        printf("SetCurrentObjectName\n");
-        if (service)
+        if (check_service())
             service->set_current_object_name(object_name);
     }
 

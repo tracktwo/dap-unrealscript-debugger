@@ -5,11 +5,29 @@
 #include <memory>
 #include <deque>
 #include <boost/asio/io_context.hpp>
-#include <boost/beast/core.hpp>
-#include <boost/beast/websocket.hpp>
+#include <boost/asio/ip/tcp.hpp>
+#include <atomic>
 
 #include "events.pb.h"
 #include "commands.pb.h"
+
+void start_debugger_service();
+bool check_service();
+
+enum class service_state : char
+{
+    // The service is not currently running, or has encountered an error. When in this state any attempt to interact with
+    // the debugger service will attempt to shut down any existing service, then start a new one.
+    stopped,
+
+    // The service is currently running.
+    running,
+
+    // We have received a shutdown request from the client. The service should be stopped, and not restarted.
+    shutdown
+};
+
+extern std::atomic<service_state> state;
 
 class DebuggerService
 {
@@ -18,7 +36,6 @@ public:
 
     void start();
     void stop();
-    void main_loop();
 
     /////////////////
     // EVENTS
@@ -89,11 +106,15 @@ private:
     struct SerializedMessage
     {
         SerializedMessage(std::unique_ptr<char[]> b, size_t l)
-            : bytes(std::move(b)), len(l), buffer{bytes.get(), len}
+            : bytes(std::move(b)), len(l)
         {}
+
+        SerializedMessage()
+            : bytes{}, len{ 0 }
+        {}
+
         std::unique_ptr<char[]> bytes;
         size_t len;
-        boost::asio::const_buffer buffer;
     };
 
     // A queue of serialized messages waiting to be sent.
@@ -103,15 +124,13 @@ private:
     // the calls from Unreal (writing debugger events).
     std::mutex mu_;
 
-    std::unique_ptr<boost::asio::ip::tcp::acceptor> acceptor_;
+    using tcp = boost::asio::ip::tcp;
 
-    // The boost io context for use for all async i/o over the socket
-    boost::asio::io_context ios_;
+    std::unique_ptr<tcp::acceptor> acceptor_;
 
+    std::unique_ptr<tcp::socket> socket_;
 
-    std::unique_ptr<boost::beast::websocket::stream<boost::beast::tcp_stream>> socket_;
-
-    boost::beast::flat_buffer read_buffer_;
+    SerializedMessage next_message_;
 
     bool connected_ = false;
 };

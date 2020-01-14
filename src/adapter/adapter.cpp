@@ -106,6 +106,7 @@ namespace handlers
 
     dap::DisconnectResponse disconnect(const dap::DisconnectRequest& request)
     {
+        client::commands::stop_debugging();
         return {};
     }
 
@@ -330,6 +331,7 @@ void console_message(const std::string& msg)
     dap::OutputEvent ev;
     ev.output = msg;
     ev.category = "console";
+    session->send(ev);
 }
 
 void create_adapter()
@@ -358,6 +360,7 @@ void create_adapter()
     session->registerHandler(&handlers::next_handler);
     session->registerHandler(&handlers::step_in_handler);
     session->registerHandler(&handlers::step_out_handler);
+    session->registerHandler(&handlers::disconnect);
 
     session->registerSentHandler(&sent_handlers::initialize_response);
 }

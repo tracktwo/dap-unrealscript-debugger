@@ -7,82 +7,95 @@
 #include "service.h"
 
 std::unique_ptr<DebuggerService> service;
+boost::asio::io_context ios;
+std::thread worker;
+std::atomic<service_state> state;
 
 namespace asio = boost::asio;
-namespace websocket = boost::beast::websocket;
-using tcp = boost::asio::ip::tcp;
-
 
 static const int default_port = 10077;
 
 DebuggerService::DebuggerService() :
-    ios_{},
     watch_indices_{1, 1, 1}
 {}
 
 void DebuggerService::start()
 {
-    worker_ = std::thread(&DebuggerService::main_loop, this);
+    // TODO Add environment var for port override?
+    int port = default_port;
+
+    acceptor_ = std::make_unique<tcp::acceptor>(ios, tcp::endpoint(tcp::v4(), port));
+
+    // Queue the next connection
+    accept_connection();
+    state = service_state::running;
 }
 
 void DebuggerService::stop()
 {
-    // Note that the io_context is documented to be thread-safe. Request a stop and
-    // then halt the worker thread.
-  //  socket_.unbind(addr_);
-    ios_.stop();
-    if (worker_.joinable())
-        worker_.join();
+    // Request a stop, usually because of an error or if the client debug session has stopped.
+    // We just set a flag, which will be tested the next time we enter the API from Unreal.
+    // (note that this flag is an atomic).
+    state = service_state::stopped;
 }
 
 void DebuggerService::receive_next_message()
 {
     {
         Lock lock{mu_};
-        socket_->async_read(read_buffer_, [this](boost::system::error_code& ec, std::size_t len) {
+        socket_->async_receive(boost::asio::buffer(&next_message_.len, 4), [this](const boost::system::error_code& ec, std::size_t len) {
             if (ec)
             {
-                printf("UnrealDebugger: Sending command received error: %s\n", ec.message().c_str());
+                printf("UnrealDebugger: Receiving command header error: %s\n", ec.message().c_str());
+                stop();
+                return;
+            }
+            if (len != 4)
+            {
+                printf("UnrealDebugger: failed to read header.");
+                stop();
+                return;
             }
 
-            unreal_debugger::commands::Command cmd;
-            if (cmd.ParseFromArray(read_buffer_.data().data(), len))
-            {
-                dispatch_command(cmd);
-            }
-            else
-            {
-                printf("UnrealDebugger: Failed to parse command.");
-            }
-            receive_next_message();
+            next_message_.bytes = std::make_unique<char[]>(next_message_.len);
+            socket_->async_receive(boost::asio::buffer(next_message_.bytes.get(), next_message_.len), [this](const boost::system::error_code& ec, std::size_t len) {
+                unreal_debugger::commands::Command cmd;
+
+                if (ec)
+                {
+                    printf("UnrealDebugger: Receiving command body error: %s\n", ec.message().c_str());
+                    stop();
+                    return;
+                }
+                if (len != next_message_.len)
+                {
+                    printf("UnrealDebugger: failed to read body: read %z of %z bytes\n", len, next_message_.len);
+                    stop();
+                    return;
+                }
+
+                if (cmd.ParseFromArray(next_message_.bytes.get(), next_message_.len))
+                {
+                    dispatch_command(cmd);
+                }
+                else
+                {
+                    printf("UnrealDebugger: Failed to parse command.");
+                }
+                receive_next_message();
+            });
         });
     }
 }
 
 void DebuggerService::accept_connection()
 {
-    acceptor_->async_accept([this](const boost::beast::error_code& ec, tcp::socket socket) {
-
+    acceptor_->async_accept([this](const boost::system::error_code& ec, tcp::socket socket) {
         // We have a new connection. Create a new websocket from the tcp socket, and start the upgrade handshake.
-        this->socket_ = std::make_unique<websocket::stream<boost::beast::tcp_stream>>(std::move(socket));
-        this->socket_->async_accept([this](boost::beast::error_code& ec) {
-            // We have upgraded to websocket! Queue the first read.
-            this->connected_ = true;
-            this->receive_next_message();
-        });
+        this->socket_ = std::make_unique<tcp::socket>(std::move(socket));
+        this->connected_ = true;
+        this->receive_next_message();
     });
-}
-
-void DebuggerService::main_loop()
-{
-    // TODO Add environment var for port override?
-    int port = default_port;
-
-    acceptor_ = std::make_unique<tcp::acceptor>(ios_, tcp::endpoint(tcp::v4(), port));
-
-    // Queue the next connection
-    accept_connection();
-    ios_.run();
 }
 
 // Enqueues a message to send to the debugger client. If the queue is
@@ -128,28 +141,121 @@ void DebuggerService::send_next_message()
     assert(!send_queue_.empty());
     auto&& next_msg = send_queue_.front();
 
-    socket_->async_write(next_msg.buffer, [this, len=next_msg.len](boost::system::error_code ec, std::size_t n) {
-
-        bool is_empty = false;
+    socket_->async_send(boost::asio::buffer(&next_msg.len, 4), [this](const boost::system::error_code& ec, std::size_t n) {
+        if (ec)
         {
-            Lock lock(mu_);
-
-            if (ec)
-            {
-                printf("UnrealDebugger: Sending command received error: %s\n", ec.message().c_str());
-            }
-            if (n != len)
-            {
-                printf("UnrealDebugger: Sending command truncated: wrote %z of %z bytes\n", n, len);
-            }
-
-            send_queue_.pop_front();
-            is_empty = send_queue_.empty();
+            printf("UnrealDebugger: Sending event header error: %s\n", ec.message().c_str());
+            stop();
+            return;
+        }
+        if (n != 4)
+        {
+            printf("UnrealDebugger: Sending event header truncated: wrote %z of 4 bytes\n", n);
+            stop();
+            return;
         }
 
-        // If we have more data ready to go, send the next one.
-        if (!is_empty) {
-            send_next_message();
-        }
+        auto&& next_msg = send_queue_.front();
+
+        socket_->async_send(boost::asio::buffer(next_msg.bytes.get(), next_msg.len), [this, len = next_msg.len](boost::system::error_code ec, std::size_t n) {
+            bool is_empty = false;
+            {
+                Lock lock(mu_);
+
+                if (ec)
+                {
+                    printf("UnrealDebugger: Sending event body error: %s\n", ec.message().c_str());
+                    stop();
+                    return;
+                }
+                if (n != len)
+                {
+                    printf("UnrealDebugger: Sending event body truncated: wrote %z of %z bytes\n", n, len);
+                    stop();
+                    return;
+                }
+
+                send_queue_.pop_front();
+                is_empty = send_queue_.empty();
+            }
+
+            // If we have more data ready to go, send the next one.
+            if (!is_empty) {
+                send_next_message();
+            }
+        });
     });
+
 }
+
+void worker_loop()
+{
+    // The main worker loop thread just services ASIO tasks.
+    ios.run();
+}
+
+// Start the debugger service: create the service instance
+void start_debugger_service()
+{
+    if (service)
+        service.release();
+
+    service = std::make_unique<DebuggerService>();
+
+    // Start listening for connections.
+    service->start();
+
+    worker = std::thread(worker_loop);
+}
+
+// Try to ensure the debugger service is in a good state. Returns 'true' if the service is up
+// and we can service events, or false otherwise. A false result may mean the the service is either
+// shut down or in the process of shutting down, but no debugger API calls can be serviced.
+bool check_service()
+{
+    switch (state)
+    {
+    case service_state::stopped:
+    case service_state::shutdown:
+        // If we are stopped or shut down and there is a service, kill the service (as cleanly as possible)
+        // and for the 'stopped' case, restart it.
+        if (service)
+        {
+            // Stop the ASIO task service. This will allow the worker thread to halt.
+            ios.stop();
+
+            // Stop the worker thread. If we ended up calling stop from a thread owned by
+            // Unreal, we can just join (and this shouldn't take *too* long for the worker
+            // thread to stop). If we're called on the worker thread then all we can do is detach
+            // to let it unwind itself and stop (which it should do quickly, now that the io
+            // context is stopped).
+            if (worker.joinable() && std::this_thread::get_id() != worker.get_id())
+            {
+                worker.join();
+            }
+            else
+            {
+                worker.detach();
+            }
+
+            // The worker thread has cleanly shut down (or we have detached it and can't do anything more).
+            // Destroy the service.
+            service.release();
+
+            printf("Debugger stopped!\n");
+        }
+
+        // Restart, if applicable
+        if (state == service_state::stopped)
+        {
+            start_debugger_service();
+            printf("Debugger service running!\n");
+            return true;
+        }
+        return false;
+
+    case service_state::running:
+        return true;
+    }
+}
+

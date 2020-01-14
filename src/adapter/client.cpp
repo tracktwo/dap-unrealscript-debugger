@@ -6,18 +6,16 @@
 
 #include <io.h>
 #include <fcntl.h>
-#include <boost/beast/core.hpp>
-#include <boost/beast/websocket.hpp>
+#include <boost/asio/ip/tcp.hpp>
 
 static const int default_port = 10077;
 
 namespace asio = boost::asio;
-namespace websocket = boost::beast::websocket;
 using tcp = boost::asio::ip::tcp;
 
 boost::asio::io_context ios;
-std::unique_ptr<websocket::stream<boost::beast::tcp_stream>> sock;
-boost::beast::flat_buffer read_buffer;
+std::unique_ptr<tcp::socket> sock;
+SerializedCommand next_event;
 
 std::mutex client_mutex;
 Debugger debugger;
@@ -31,7 +29,7 @@ void receive_next_event()
     {
         std::lock_guard<std::mutex> lock{ client_mutex };
 
-        sock->async_read(read_buffer, [](const boost::system::error_code& ec, std::size_t len) {
+        sock->async_receive(boost::asio::buffer(&next_event.len, 4), [](const boost::system::error_code& ec, std::size_t len) {
 
             {
                 // Reaquire the lock before dispatching any events.
@@ -39,21 +37,40 @@ void receive_next_event()
 
                 if (ec)
                 {
-                    dap::writef(log_file, "receiving event received error: %s", ec.message().c_str());
+                    dap::writef(log_file, "receiving event header error: %s", ec.message().c_str());
                 }
 
-                unreal_debugger::events::Event ev;
-                if (ev.ParseFromArray(read_buffer.data().data(), len))
+                if (len != 4)
                 {
-                    dispatch_event(ev);
+                    dap::writef(log_file, "failed to read next message header: read %z of 4 bytes\n", len);
                 }
-                else
-                {
-                    dap::writef(log_file, "failed to parse event.");
-                }
+
+                // TODO Reuse existing buffer if it's big enough.
+                next_event.bytes = std::make_unique<char[]>(next_event.len);
+
+                sock->async_receive(boost::asio::buffer(next_event.bytes.get(), next_event.len), [](const boost::system::error_code& ec, std::size_t len) {
+                    if (ec)
+                    {
+                        dap::writef(log_file, "receiving event body error: %s", ec.message().c_str());
+                    }
+
+                    if (len != next_event.len)
+                    {
+                        dap::writef(log_file, "failed to read next message body: received %z of %z bytes\n", len, next_event.len);
+                    }
+                    unreal_debugger::events::Event ev;
+                    if (ev.ParseFromArray(next_event.bytes.get(), len))
+                    {
+                        dispatch_event(ev);
+                    }
+                    else
+                    {
+                        dap::writef(log_file, "failed to parse event.");
+                    }
+
+                    receive_next_event();
+                });
             }
-
-            receive_next_event();
         });
     }
 }
@@ -66,34 +83,48 @@ void send_next_message()
     auto&& next_msg = send_queue.front();
 
     // Begin the async send of the front-most message
-    sock->async_write(asio::buffer(next_msg.bytes.get(), next_msg.len), [len = next_msg.len](const boost::system::error_code& ec, std::size_t n) {
-        bool is_empty = false;
-
+    sock->async_send(asio::buffer(&next_msg.len, 4), [](const boost::system::error_code& ec, std::size_t n) {
+        if (ec)
         {
-            std::lock_guard<std::mutex> lock(client_mutex);
-
-            // Perform some basic error checking and log the results.
-            if (ec)
-            {
-                dap::writef(log_file, "sending command received error: %s", ec.message().c_str());
-            }
-
-            if (n != len)
-            {
-                dap::writef(log_file, "sending command truncated: wrote %z of %z bytes", n, len);
-            }
-
-            // Remove this message from the queue.
-            send_queue.pop_front();
-            is_empty = send_queue.empty();
+            dap::writef(log_file, "sending command header received error: %s", ec.message().c_str());
         }
 
-        // If the queue was not empty after removing this just-sent message, schedule the async send of the next message in the queue.
-        // If the queue was empty the send will be scheduled by the next command that gets enqueued via send_command.
-        if (!is_empty)
+        if (n != 4)
         {
-            send_next_message();
+            dap::writef(log_file, "sending command header truncated: wrote %z of 4 bytes", n);
         }
+
+        // Now send the message body
+        auto&& next_msg = send_queue.front();
+        sock->async_send(asio::buffer(next_msg.bytes.get(), next_msg.len), [len = next_msg.len](const boost::system::error_code& ec, std::size_t n) {
+            bool is_empty = false;
+
+            {
+                std::lock_guard<std::mutex> lock(client_mutex);
+
+                // Perform some basic error checking and log the results.
+                if (ec)
+                {
+                    dap::writef(log_file, "sending command received error: %s", ec.message().c_str());
+                }
+
+                if (n != len)
+                {
+                    dap::writef(log_file, "sending command truncated: wrote %z of %z bytes", n, len);
+                }
+
+                // Remove this message from the queue.
+                send_queue.pop_front();
+                is_empty = send_queue.empty();
+            }
+
+            // If the queue was not empty after removing this just-sent message, schedule the async send of the next message in the queue.
+            // If the queue was empty the send will be scheduled by the next command that gets enqueued via send_command.
+            if (!is_empty)
+            {
+                send_next_message();
+            }
+        });
     });
 }
 
@@ -159,14 +190,14 @@ int main(int argc, char *argv[])
 
     dap::writef(log_file, "Started!\n");
 
-    sock = std::make_unique<websocket::stream<boost::beast::tcp_stream>>(ios);
-    boost::beast::get_lowest_layer(*sock).connect(tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), default_port));
-    boost::beast::error_code ec;
-    sock->handshake("127.0.0.1", "/", ec);
-
+    sock = std::make_unique<tcp::socket>(ios);
+    boost::system::error_code ec;
+    sock->connect(tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), default_port), ec);
     if (ec)
     {
-        dap::writef(log_file, "Error during socket handshake: %s\n", ec.message().c_str());
+        dap::writef(log_file, "Connection to debugger failed: %s\n", ec.message().c_str());
+        // TODO Error message.
+        return 1;
     }
 
    // create_adapter();

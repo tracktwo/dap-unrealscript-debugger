@@ -190,6 +190,8 @@ void DebuggerService::break_cmd(const unreal_debugger::commands::Break& cmd)
 
 void DebuggerService::stop_debugging(const unreal_debugger::commands::StopDebugging& cmd)
 {
+    state = service_state::shutdown;
+    // TODO Does this work?
     callback_function("stopdebugging");
 }
 
