@@ -91,6 +91,10 @@ message SetCurrentObjectName
     string object_name = 1;
 }
 
+message Terminated
+{
+}
+
 message Event
 {
     enum Kind {
@@ -111,6 +115,7 @@ message Event
         CallStackClear = 14;
         CallStackAdd = 15;
         SetCurrentObjectName = 16;
+        Terminated = 17;
     }
 
     Kind kind = 1;
@@ -131,5 +136,6 @@ message Event
         CallStackClear call_stack_clear = 15;
         CallStackAdd call_stack_add = 16;
         SetCurrentObjectName set_current_object_name = 17;
+        Terminated terminated = 18;
     }
 }

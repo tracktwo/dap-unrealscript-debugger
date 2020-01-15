@@ -30,6 +30,8 @@ extern std::deque<SerializedCommand> send_queue;
 void send_command(const unreal_debugger::commands::Command& command);
 void dispatch_event(const unreal_debugger::events::Event& ev);
 
+void stop_debugger();
+
 namespace client
 {
     namespace commands

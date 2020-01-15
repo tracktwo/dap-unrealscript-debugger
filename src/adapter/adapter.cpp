@@ -20,8 +20,6 @@ std::unique_ptr<dap::net::Server> server;
 // thread we can access '1'.
 static const int unreal_thread_id = 1;
 
-Signal term;
-
 namespace util
 {
     // Given a source reference, return the unreal class name, qualified with package name.
@@ -78,7 +76,7 @@ namespace handlers
         if (log_enabled)
         {
             dap::writef(log_file, "Session error: %s\n", msg);
-            term.fire();
+            stop_debugger();
         }
     }
 
@@ -326,12 +324,22 @@ void breakpoint_hit()
     session->send(ev);
 }
 
+// Tell the debug client that the debugger has produced some log output.
 void console_message(const std::string& msg)
 {
     dap::OutputEvent ev;
     ev.output = msg;
     ev.category = "console";
     session->send(ev);
+}
+
+// The debugger has stopped. Send a terminated event to the client, and begin
+// our shutdown process.
+void debugger_terminated()
+{
+    dap::TerminatedEvent ev;
+    session->send(ev);
+    stop_debugger();
 }
 
 void create_adapter()
@@ -371,13 +379,17 @@ void on_connect(const std::shared_ptr<dap::ReaderWriter>& streams)
   //  auto spy = dap::spy(static_cast<std::shared_ptr<dap::Reader>>(streams), log_file);
    // session->bind(spy, static_cast<std::shared_ptr<dap::Writer>>(streams));
     session->bind(streams);
-    term.wait();
 }
 
 void start_debug_server()
 {
     server = dap::net::Server::create();
     server->start(9444, on_connect);
+}
+
+void stop_debug_server()
+{
+    server->stop();
 }
 
 void start_debug_local()
@@ -389,12 +401,10 @@ void start_debug_local()
   //  session->bind(dap::spy(in, log_file), dap::spy(out, log_file));
     session->bind(in, out);
     dap::writef(log_file, "Bound to in/out\n");
-    term.wait();
-
 }
 
 void stop_adapter()
 {
-    session.release();
-    server.release();
+    session.reset();
+    server.reset();
 }

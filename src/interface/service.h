@@ -36,6 +36,7 @@ public:
 
     void start();
     void stop();
+    void shutdown();
 
     /////////////////
     // EVENTS

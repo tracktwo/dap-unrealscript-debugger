@@ -86,6 +86,11 @@ void set_current_object_name(const SetCurrentObjectName& ev)
 
 }
 
+void set_terminated(const Terminated& ev)
+{
+    debugger_terminated();
+}
+
 // Helper for event dispatch checking.
 //
 // Given an event, a predicate, a getter, and a handler, if the predicate on the event is
@@ -131,6 +136,7 @@ void dispatch_event(const Event& ev)
     case Event_Kind_CallStackClear:         dispatch_event(ev, &Event::has_call_stack_clear,        &Event::call_stack_clear,           &call_stack_clear);         break;
     case Event_Kind_CallStackAdd:           dispatch_event(ev, &Event::has_call_stack_add,          &Event::call_stack_add,             &call_stack_add);           break;
     case Event_Kind_SetCurrentObjectName:   dispatch_event(ev, &Event::has_set_current_object_name, &Event::set_current_object_name,    &set_current_object_name);  break;
+    case Event_Kind_Terminated:             dispatch_event(ev, &Event::has_terminated,              &Event::terminated,                 &set_terminated);           break;
     default:
         dap::writef(log_file, "Error: got unknown event %d\n", ev.kind());
     }

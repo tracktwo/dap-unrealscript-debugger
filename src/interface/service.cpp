@@ -31,12 +31,29 @@ void DebuggerService::start()
     state = service_state::running;
 }
 
+// Request a stop, usually because of an error.
+//
+// We just set a flag, which will be tested the next time we enter the API from Unreal.
+// (note that this flag is an atomic). In the stopped state the debugger will attempt to
+// cleanly shutdown all of its state (including closing the socket and halting the IO
+// thread) and then restart itself.
 void DebuggerService::stop()
 {
-    // Request a stop, usually because of an error or if the client debug session has stopped.
-    // We just set a flag, which will be tested the next time we enter the API from Unreal.
-    // (note that this flag is an atomic).
     state = service_state::stopped;
+}
+
+// Shutdown the debugger with no restart. This is intended to be called when Unreal initiates
+// a debugger shutdown (via a toggledebugger console command).
+void DebuggerService::shutdown()
+{
+    using namespace unreal_debugger::events;
+
+    Event ev;
+    ev.set_kind(Event_Kind_Terminated);
+    ev.mutable_terminated();
+    // Send a 'terminated' event to the debugger client so it knows unreal has stopped the debugger.
+    send_event(ev);
+    state = service_state::shutdown;
 }
 
 void DebuggerService::receive_next_message()
@@ -242,6 +259,8 @@ bool check_service()
             // Destroy the service.
             service.release();
 
+            callback_function = nullptr;
+
             printf("Debugger stopped!\n");
         }
 
@@ -256,6 +275,11 @@ bool check_service()
 
     case service_state::running:
         return true;
+
+    default:
+        printf("Debugger error: Unknown state %d\n", static_cast<int>(state.load()));
+        state = service_state::stopped;
+        return check_service();
     }
 }
 

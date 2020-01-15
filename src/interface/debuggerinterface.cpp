@@ -19,6 +19,8 @@
 
 UnrealCallback callback_function = nullptr;
 
+static const char* magic_debugger_stopped_log_entry = "Log: Detaching UnrealScript Debugger (currently detached)";
+
 extern "C"
 {
     __declspec(dllexport) void SetCallback(void* cb)
@@ -123,7 +125,28 @@ extern "C"
     __declspec(dllexport) void AddLineToLog(const char* text)
     {
         if (check_service())
+        {
             service->add_line_to_log(text);
+
+            // Unreal doesn't provide an entry point to indicate that the debugger should be stopped, e.g.
+            // when the "toggledebugger" command is used when the debugger is running. The one and only entry
+            // we get into the Debugger Interface DLL when this happens is a log entry. The existing debugger
+            // checks for this special log entry and uses it to initiate a clean shutdown. Extremely gross,
+            // but we have to do the same or we can't tell the debugger client that things are shutting down.
+            // Even worse, we otherwise can't halt the IO thread, which would prevent Unreal from shutting down
+            // cleanly when the game is closed.
+            //
+            // Note that we get this log entry for both when unreal has initiated the stop and when the client
+            // has requested a stop via the "stopdebugger" command. This will only be hit for the former case,
+            // as when we process "stopdebugger" we have already toggled the state to 'shutdown' and check_service
+            // will not return true.
+            if (strcmp(text, magic_debugger_stopped_log_entry) == 0)
+            {
+                service->shutdown();
+                // Run the check_service utility to initiate the shutdown, since unreal won't be calling us again.
+                check_service();
+            }
+        }
     }
 
     __declspec(dllexport) void CallStackClear()

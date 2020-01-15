@@ -38,11 +38,15 @@ void receive_next_event()
                 if (ec)
                 {
                     dap::writef(log_file, "receiving event header error: %s", ec.message().c_str());
+                    debugger_terminated();
+                    return;
                 }
 
                 if (len != 4)
                 {
                     dap::writef(log_file, "failed to read next message header: read %z of 4 bytes\n", len);
+                    debugger_terminated();
+                    return;
                 }
 
                 // TODO Reuse existing buffer if it's big enough.
@@ -52,11 +56,15 @@ void receive_next_event()
                     if (ec)
                     {
                         dap::writef(log_file, "receiving event body error: %s", ec.message().c_str());
+                        debugger_terminated();
+                        return;
                     }
 
                     if (len != next_event.len)
                     {
                         dap::writef(log_file, "failed to read next message body: received %z of %z bytes\n", len, next_event.len);
+                        debugger_terminated();
+                        return;
                     }
                     unreal_debugger::events::Event ev;
                     if (ev.ParseFromArray(next_event.bytes.get(), len))
@@ -152,16 +160,16 @@ void send_command(const unreal_debugger::commands::Command& cmd)
     }
 }
 
-void shutdown()
+// Begin the shutdown process: This stops the IO process, which will allow the main
+// thread to begin the cleanup of the DAP connection and ultimately exit the process.
+void stop_debugger()
 {
-   // ios.stop();
+   ios.stop();
 }
 
 int main(int argc, char *argv[])
 {
     bool debug_mode = false;
-    std::thread dap_thread;
-
 
     if (argc > 1 && strcmp(argv[1], "debug") == 0)
     {
@@ -207,7 +215,7 @@ int main(int argc, char *argv[])
     }
     else
     {
-        dap_thread = std::thread(start_debug_local);
+        start_debug_local();
     }
 
     // Schedule an async read of the next event from the debugger, then let
@@ -218,16 +226,14 @@ int main(int argc, char *argv[])
     // debugger interface and dispatching them).
     ios.run();
 
-    term.fire();
-  //  term.wait();
+    // We return from 'run' when the debugger has asked to shut down. Shut down the
+    // dap service.
 
-    // We return from 'run' when the debugger has asked to shut down. Stop the
-    // DAP service.
-    stop_adapter();
-    if (!debug_mode)
+    if (debug_mode)
     {
-        dap_thread.join();
+        stop_debug_server();
     }
-
+    log_file->close();
+    stop_adapter();
 }
 
