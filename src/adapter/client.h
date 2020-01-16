@@ -51,5 +51,7 @@ namespace client
         void step_into();
         void step_outof();
         void stop_debugging();
+
+        void toggle_watch_info(bool b);
     }
 }

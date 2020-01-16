@@ -37,13 +37,16 @@ void DebuggerService::add_class_to_hierarchy(const char* class_name)
 
 void DebuggerService::clear_a_watch(int watch_kind)
 {
-    Event ev;
-    ev.set_kind(Event_Kind_ClearAWatch);
-    ev.mutable_clear_a_watch()->set_watch_type(watch_kind);
-
     // Reset the watch index for this kind. See the comment on
     // add_a_watch for more details of the watch indices.
     watch_indices_[watch_kind] = 1;
+
+    if (!send_watch_info_)
+        return;
+
+    Event ev;
+    ev.set_kind(Event_Kind_ClearAWatch);
+    ev.mutable_clear_a_watch()->set_watch_type(watch_kind);
 }
 
 // AddAWatch is special : it's the only entry point from unreal that accepts a return value.
@@ -67,10 +70,13 @@ void DebuggerService::clear_a_watch(int watch_kind)
 // Each 'AddAWatch' call will assign the current watch index for that watch kind and increment it.
 int DebuggerService::add_a_watch(int watch_kind, int parent, const char* name, const char* value)
 {
-    Event ev;
-
     // Assign this variable the next available watch number in the given list.
     int idx = watch_indices_[watch_kind]++;
+
+    if (!send_watch_info_)
+        return idx;
+
+    Event ev;
 
     ev.set_kind(Event_Kind_AddAWatch);
     AddAWatch* add = ev.mutable_add_a_watch();
@@ -86,6 +92,9 @@ int DebuggerService::add_a_watch(int watch_kind, int parent, const char* name, c
 
 void DebuggerService::lock_list(int watch_kind)
 {
+    if (!send_watch_info_)
+        return;
+
     Event ev;
     ev.set_kind(Event_Kind_LockList);
     ev.mutable_lock_list()->set_watch_type(watch_kind);
@@ -94,6 +103,9 @@ void DebuggerService::lock_list(int watch_kind)
 
 void DebuggerService::unlock_list(int watch_kind)
 {
+    if (!send_watch_info_)
+        return;
+
     Event ev;
     ev.set_kind(Event_Kind_UnlockList);
     ev.mutable_unlock_list()->set_watch_type(watch_kind);

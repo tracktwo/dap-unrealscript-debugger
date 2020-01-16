@@ -2,13 +2,14 @@
 #include "client.h"
 #include "debugger.h"
 #include "adapter.h"
+#include "signals.h"
 
 using namespace unreal_debugger::events;
 
 void show_dll_form(const ShowDllForm& ev)
 {
  
-    debugger.finalize_stack_frame();
+    debugger.finalize_callstack();
     // Tell the debugger we've hit a breakpoint.
     breakpoint_hit();
 }
@@ -85,7 +86,13 @@ void call_stack_add(const CallStackAdd& ev)
 
 void set_current_object_name(const SetCurrentObjectName& ev)
 {
-
+    // When changing frames for the purposes of fetching line info for the call stack 'current object name'
+    // is the last event we will receive from Unreal, so we can use this to signal that the change is complete.
+    // This is because we've disabled watch info for this change.
+    if (debugger.get_state() == Debugger::State::waiting_for_frame_line)
+    {
+        signals::line_received.fire();
+    }
 }
 
 void set_terminated(const Terminated& ev)

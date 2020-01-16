@@ -255,6 +255,7 @@ namespace handlers
         // Remember what frame we are currently looking at so we can restore it if we need to change it to
         // fetch information here.
         int previous_frame = debugger.get_current_frame_index();
+        bool disabled_watch_info = false;
 
         for (int frame_index = 0; frame_index < debugger.get_callstack().size(); frame_index++)
         {
@@ -263,12 +264,23 @@ namespace handlers
 
             if (debugger_frame.line_number == 0)
             {
-                // We have not yet fetched this frame. Request it now. Note that this should only change the
-                // existing stack frame entries in-place and not invalidate this iterator.
+                // We have not yet fetched this frame's line number. Request it now.
                 debugger.set_current_frame_index(frame_index);
+                debugger.set_state(Debugger::State::waiting_for_frame_line);
+
+                // Tell the debugger interface not to bother sending watch info: we only want line numbers
+                // when swapping frames.
+                if (!disabled_watch_info)
+                {
+                    client::commands::toggle_watch_info(false);
+                    disabled_watch_info = true;
+                }
+
+                // Request a stack change and wait for the line number to be received.
                 client::commands::change_stack(frame_index);
-                signals::stack_changed.wait();
-                signals::stack_changed.reset();
+                signals::line_received.wait();
+                signals::line_received.reset();
+                debugger.set_state(Debugger::State::normal);
             }
 
             dap_frame.id = count;
@@ -287,19 +299,19 @@ namespace handlers
 
         // Restore the frame index to our original value.
         debugger.set_current_frame_index(previous_frame);
+
+        // If we asked the debugger to stop sending watch info, turn it back on now
+        if (disabled_watch_info)
+        {
+            client::commands::toggle_watch_info(true);
+        }
+
         return response;
     }
 
     // Handle a request for scope information
     dap::ResponseOrError<dap::ScopesResponse> scopes_handler(const dap::ScopesRequest& request)
     {
-
-        // TODO fixme
-       // if (request.frameId != 0)
-       // {
-       //     return dap::Error("Only the top frame is currently supported.");
-       // }
-
         dap::Scope scope;
         scope.name = "Locals";
         scope.presentationHint = "locals";

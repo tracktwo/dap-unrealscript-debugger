@@ -94,6 +94,14 @@ namespace client
             send_command(cmd);
         }
 
+        void toggle_watch_info(bool b)
+        {
+            ToggleWatchInfo toggle_watch_info;
+            Command cmd;
 
+            cmd.set_kind(Command_Kind_ToggleWatchInfo);
+            cmd.mutable_toggle_watch_info()->set_send_watch_info(b);
+            send_command(cmd);
+        }
     }
 }

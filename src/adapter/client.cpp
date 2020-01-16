@@ -19,7 +19,7 @@ std::unique_ptr<tcp::socket> sock;
 SerializedCommand next_event;
 
 namespace signals {
-    signal stack_changed;
+    signal line_received;
 }
 
 std::mutex client_mutex;

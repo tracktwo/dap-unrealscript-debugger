@@ -161,17 +161,29 @@ Debugger::StackFrame& Debugger::get_current_stack_frame()
 // are pushed onto the back in the order they're received, so we wind up with the frames
 // in reverse order of how unreal numbers them. DAP also wants to receive the frames with the
 // top-most as id 0.
+//
+// Unreal also sends some info before the stack: we get the current line number and class name
+// for a breakpoint that is hit before the call stack is cleared and reset. This line number and
+// class name logically belongs with the topmost frame, but we need to be careful to keep it
+// when unreal later clears the stack. This is done by storing the line number and class name in
+// entry 0, and "clearing" the stack removes all entries except the first.
+//
+// Once the callstack is complete, we need to copy the saved 
 void Debugger::finalize_callstack()
 {
-    // The topmost entry on the call stack is missing most info except the function and class name.
-    // All the other info (especially the line number and all variables) are associated with the
-    // special frame 0.
-    Debugger::StackFrame& bottom_frame = *debugger.get_callstack().begin();
-    Debugger::StackFrame& top_frame = *debugger.get_callstack().rbegin();
+    // The bottom-most and top-most entries on the current call stack are the same entry, but
+    // both are incomplete: only the bottom has the line number, and only the top has the function
+    // name.
+    Debugger::StackFrame& bottom_frame = *callstack.begin();
+    Debugger::StackFrame& top_frame = *callstack.rbegin();
 
-    // Copy the function name to the bottom entry
-    bottom_frame.function_name = top_frame.function_name;
+    // Copy the line number to the top-most frame.
+    top_frame.line_number = bottom_frame.line_number;
 
-    // Overwrite the entire top frame with the bottom entry
-    top_frame = bottom_frame;
+    // Reverse the call stack so our 0th index is the top-most entry
+    std::reverse(callstack.begin(), callstack.end());
+   
+    // pop off the now redundant duplicated entry we have on the end of the stack.
+    // This leaves the stack with index 0 as the top-most entry, and with complete info.
+    callstack.pop_back();
 }

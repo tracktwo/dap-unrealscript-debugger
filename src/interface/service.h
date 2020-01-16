@@ -86,6 +86,7 @@ public:
     void step_into(const unreal_debugger::commands::StepInto& cmd);
     void step_over(const unreal_debugger::commands::StepOver& cmd);
     void step_out_of(const unreal_debugger::commands::StepOutOf& cmd);
+    void toggle_watch_info(const unreal_debugger::commands::ToggleWatchInfo& cmd);
 
 private:
 
@@ -139,6 +140,7 @@ private:
     int call_stack_size_ = 0;
     std::string current_stack_frame_name_;
     int current_stack_frame_line_;
+    bool send_watch_info_ = true;
 };
 
 // The callback function back into unreal just takes a simple string argument

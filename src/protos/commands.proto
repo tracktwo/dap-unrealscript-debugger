@@ -72,6 +72,11 @@ message StepOutOf
 {
 }
 
+message ToggleWatchInfo
+{
+    bool send_watch_info = 1;
+}
+
 message Command
 {
     enum Kind {
@@ -90,6 +95,7 @@ message Command
         StepInto = 12;
         StepOver = 13;
         StepOutOf = 14;
+        ToggleWatchInfo = 15;
     }
 
     Kind kind = 1;
@@ -109,5 +115,6 @@ message Command
         StepInto step_into = 13;
         StepOver step_over = 14;
         StepOutOf step_out_of = 15;
+        ToggleWatchInfo toggle_watch_info = 16;
     }
 }

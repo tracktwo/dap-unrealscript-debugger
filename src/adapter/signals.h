@@ -29,6 +29,6 @@ namespace signals
         bool fired = false;
     };
 
-    extern signal stack_changed;
+    extern signal line_received;
 }
 

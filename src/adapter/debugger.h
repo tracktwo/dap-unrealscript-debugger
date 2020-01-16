@@ -19,6 +19,12 @@ public:
         callstack.resize(1);
     }
 
+    enum class State
+    {
+        normal,
+        waiting_for_frame_line
+    };
+
     // Watch lists
     struct WatchData
     {
@@ -61,6 +67,8 @@ public:
     void set_current_frame_index(int frame);
     StackFrame& get_current_stack_frame();
     void finalize_callstack();
+    void set_state(State s) { state = s; }
+    State get_state() const { return state; }
 
 private:
 
@@ -68,6 +76,7 @@ private:
 
     std::vector<StackFrame> callstack;
     int current_frame = 0;
+    State state;
 };
 
 extern Debugger debugger;
