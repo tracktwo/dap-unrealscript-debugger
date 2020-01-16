@@ -148,6 +148,8 @@ void DebuggerService::add_line_to_log(const char* text)
 
 void DebuggerService::call_stack_clear()
 {
+    // Reset the tracking for our call stack size.
+    call_stack_size_ = 0;
     Event ev;
     ev.set_kind(Event_Kind_CallStackClear);
     ev.mutable_call_stack_clear();
@@ -156,6 +158,7 @@ void DebuggerService::call_stack_clear()
 
 void DebuggerService::call_stack_add(const char* entry)
 {
+    // Before we can send this event we need to ask unreal to switch the frame so we can get the line number.
     Event ev;
     ev.set_kind(Event_Kind_CallStackAdd);
     ev.mutable_call_stack_add()->set_entry(entry);

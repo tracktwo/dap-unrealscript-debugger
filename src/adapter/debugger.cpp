@@ -31,28 +31,33 @@ static std::pair<std::string, std::string> split_watch_name(std::string full_nam
     return { "<unknown name>", "<unknown type>" };
 }
 
-Debugger::WatchList& Debugger::get_watch_list(WatchKind kind)
+Debugger::WatchList& Debugger::StackFrame::get_watches(WatchKind kind)
 {
     switch (kind)
     {
     case WatchKind::Local: return local_watches;
     case WatchKind::Global: return global_watches;
-    case WatchKind::User: return user_watches;
+    case WatchKind::User:
+        dap::writef(log_file, "Request for user watch in stack frame is not supported.\n");
+        [[fallthrough]];
     default:
-        // Should be unreachable
         abort();
     }
 }
 
-
+// Clear a watch list. For locals and globals they are associated with the current
+// stack frame. User watches are part of the debugger state independent of frame.
 void Debugger::clear_watch(WatchKind kind)
 {
-    get_watch_list(kind).clear();
+    if (kind == WatchKind::User)
+        user_watches.clear();
+    else
+        callstack[current_frame].get_watches(kind).clear();
 }
 
 void Debugger::add_watch(WatchKind kind, int index, int parent, const std::string& full_name, const std::string& value)
 {
-    WatchList& list = get_watch_list(kind);
+    WatchList& list = (kind == WatchKind::User) ? user_watches : callstack[current_frame].get_watches(kind);
 
     // Ensure we have a root element before adding anything more. The root element is at index 0.
     if (list.empty())
@@ -92,9 +97,21 @@ void Debugger::add_watch(WatchKind kind, int index, int parent, const std::strin
     }
 }
 
+// "clear" the callstack. Due to the order Unreal provides information we don't want to just delete
+// any existing callstack: after breaking at a breakpoint unreal sends the current class name, current
+// line number, and all watches before clearing and sending call stack information. For DAP we want to
+// have line and variable information for stacks other than the top-most, so we store all watch info
+// in the stack frame data structure. So, we always want to have at least 1 element in the call stack
+// at all times, and by the time we receive the command to clear the call stack we've already received
+// all the useful info for the top-most entry and don't want to have to throw it away and re-fetch it.
+//
+// When we get the 'clear' signal, remove all stack entries _except_ the first one. We have already
+// stored the class name, line number, and watches for this one, and they should have been reset into
+// this element overwriting whatever was there before. We do need to set a flag indicating we've just
+// cleared the stack, though, so we can recognize the first add_callstack event we receive.
 void Debugger::clear_callstack()
 {
-    callstack.clear();
+    callstack.resize(1);
 }
 
 void Debugger::add_callstack(const std::string& full_name)
@@ -118,14 +135,43 @@ void Debugger::add_callstack(const std::string& full_name)
     }
 
     idx = name.find(':');
-    if (idx > 0)
-    {
-        callstack.emplace_back(name.substr(0, idx), name.substr(idx + 1));
-    }
-    else
-    {
-        dap::writef(log_file, "No function name in call stack %s\n", full_name.c_str());
-        callstack.emplace_back(name, "");
-    }
+
+    std::string class_name = idx > 0 ? name.substr(0, idx) : name;
+    std::string function_name = idx > 0 ? name.substr(idx + 1) : "";
+    callstack.emplace_back(class_name, function_name);
 }
 
+void Debugger::set_current_frame_index(int frame)
+{
+    current_frame = frame;
+}
+
+int Debugger::get_current_frame_index() const
+{
+    return current_frame;
+}
+
+Debugger::StackFrame& Debugger::get_current_stack_frame()
+{
+    return callstack[current_frame];
+}
+
+// Unreal indexes the callstack with the top-most frame as id 0, and sends the frames
+// starting from bottom up. When we build the internal vector for the callstack the frames
+// are pushed onto the back in the order they're received, so we wind up with the frames
+// in reverse order of how unreal numbers them. DAP also wants to receive the frames with the
+// top-most as id 0.
+void Debugger::finalize_callstack()
+{
+    // The topmost entry on the call stack is missing most info except the function and class name.
+    // All the other info (especially the line number and all variables) are associated with the
+    // special frame 0.
+    Debugger::StackFrame& bottom_frame = *debugger.get_callstack().begin();
+    Debugger::StackFrame& top_frame = *debugger.get_callstack().rbegin();
+
+    // Copy the function name to the bottom entry
+    bottom_frame.function_name = top_frame.function_name;
+
+    // Overwrite the entire top frame with the bottom entry
+    top_frame = bottom_frame;
+}

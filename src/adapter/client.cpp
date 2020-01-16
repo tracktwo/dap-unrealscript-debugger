@@ -3,6 +3,7 @@
 #include "client.h"
 #include "debugger.h"
 #include "adapter.h"
+#include "signals.h"
 
 #include <io.h>
 #include <fcntl.h>
@@ -16,6 +17,10 @@ using tcp = boost::asio::ip::tcp;
 boost::asio::io_context ios;
 std::unique_ptr<tcp::socket> sock;
 SerializedCommand next_event;
+
+namespace signals {
+    signal stack_changed;
+}
 
 std::mutex client_mutex;
 Debugger debugger;

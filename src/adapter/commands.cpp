@@ -84,5 +84,16 @@ namespace client
             send_command(cmd);
         }
 
+        void change_stack(int stack_id)
+        {
+            ChangeStack change_stack;
+            Command cmd;
+
+            cmd.set_kind(Command_Kind_ChangeStack);
+            cmd.mutable_change_stack()->set_stack_id(stack_id);
+            send_command(cmd);
+        }
+
+
     }
 }

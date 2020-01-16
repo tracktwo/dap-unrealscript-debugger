@@ -134,6 +134,11 @@ private:
     SerializedMessage next_message_;
 
     bool connected_ = false;
+
+    bool building_call_stack_ = false;
+    int call_stack_size_ = 0;
+    std::string current_stack_frame_name_;
+    int current_stack_frame_line_;
 };
 
 // The callback function back into unreal just takes a simple string argument

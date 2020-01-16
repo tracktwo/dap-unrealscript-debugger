@@ -7,6 +7,8 @@ using namespace unreal_debugger::events;
 
 void show_dll_form(const ShowDllForm& ev)
 {
+ 
+    debugger.finalize_stack_frame();
     // Tell the debugger we've hit a breakpoint.
     breakpoint_hit();
 }
@@ -58,12 +60,12 @@ void remove_breakpoint(const RemoveBreakpoint& ev)
 
 void editor_load_class(const EditorLoadClass& ev)
 {
-    debugger.load_class(ev.class_name());
+    debugger.get_current_stack_frame().class_name = ev.class_name();
 }
 
 void editor_goto_line(const EditorGotoLine& ev)
 {
-    debugger.goto_line(ev.line_number());
+    debugger.get_current_stack_frame().line_number = ev.line_number();
 }
 
 void add_line_to_log(const AddLineToLog& ev)

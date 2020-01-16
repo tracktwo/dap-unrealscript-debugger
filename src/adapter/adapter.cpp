@@ -3,6 +3,7 @@
 
 #include <exception>
 #include <filesystem>
+#include <sstream>
 
 #include "dap/io.h"
 #include "dap/network.h"
@@ -12,6 +13,7 @@
 #include "adapter.h"
 #include "client.h"
 #include "debugger.h"
+#include "signals.h"
 
 std::unique_ptr<dap::Session> session;
 std::unique_ptr<dap::net::Server> server;
@@ -66,6 +68,86 @@ namespace util
         std::string file = class_name.substr(idx + 1);
 
         return dev_root + package + "\\Classes\\" + file + ".uc";
+    }
+
+
+    constexpr int variable_encoding_global_bit = 0x4000'0000;
+    constexpr int variable_encoding_frame_shift = 20;
+
+    // DAP uses 'variableReferences' to identify scopes and variables within those scopes. These are integer
+    // values and must be unique per variable but otherwise have no real meaning to the debugger. We encode
+    // the position in the stack frame and watch list in the returned variable reference to make them easy to
+    // find in the future. Of the 32-bit integer we encode the reference as follows:
+    //
+    //  [bit 31] xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx  [bit 0]
+    //
+    //  Bit 31: Always 0
+    //  Bit 30: 0 for locals, 1 for globals
+    //  Bits 29-20: Frame index: 10 bits = 1024 possible frames
+    //  Bits 19-0: Variable index in watch list within frame, + 1: 20 bits, but the 0 value is not used = 1,048,575 possible variables per frame.
+    //             The variable index is always offset by 1 from the true index within the debugger watch vector. This is
+    //             because the value 0 is special to DAP and so we cannot use it to represent the 0th local variable of the 0th stack frame.
+    //             Instead simply shift all variable indices to be 1-indexed instead of 0-indexed. This wastes 1 potential variable slot per
+    //             frame when we really only need to special case the first frame, but a million variables is a whole lot anyway.
+    int encode_variable_reference(int frame_index, int variable_index, Debugger::WatchKind kind)
+    {
+        constexpr int max_frame = 1 << 10;
+        constexpr int max_var = (1 << 20) - 1;
+
+        if (frame_index >= max_frame)
+        {
+            std::stringstream stream;
+            stream << "encode_variable_reference: frame index " << frame_index << " exceeds maximum value " << max_frame;
+            throw std::runtime_error(stream.str());
+        }
+
+        if (variable_index > max_frame)
+        {
+            std::stringstream stream;
+            stream << "encode_variable_reference: variable index " << variable_index << " exceeds maximum value " << max_var;
+            throw std::runtime_error(stream.str());
+        }
+
+        // Offset the internal variable index in the watch list by 1 to avoid the 0 issue for the first frame.
+        int encoding = variable_index + 1;
+
+        // Add in the frame reference
+        encoding |= (frame_index << variable_encoding_frame_shift);
+
+        // Add the user/global bit
+        switch (kind)
+        {
+        case Debugger::WatchKind::Local:
+            // Nothing to do for locals
+            break;
+        case Debugger::WatchKind::Global:
+            encoding |= variable_encoding_global_bit;
+            break;
+        case Debugger::WatchKind::User:
+            throw std::runtime_error("encode_variable_reference: cannot encode a user watch.");
+
+        }
+
+        return encoding;
+    }
+
+    std::tuple<int, int, Debugger::WatchKind> decode_variable_reference(int variable_reference)
+    {
+        // The mask to apply to isolate the variable index: shift 1 by the frame shift amount and subtract 1 to set all bits below
+        // the first bit of the frame.
+        constexpr int variable_mask = (1 << variable_encoding_frame_shift) - 1;
+
+        // Record and then unset the global watch flag.
+        Debugger::WatchKind kind = (variable_reference & variable_encoding_global_bit) ? Debugger::WatchKind::Global : Debugger::WatchKind::Local;
+        variable_reference &= ~variable_encoding_global_bit;
+
+        // Extract the variable portion.
+        int variable_index = (variable_reference & variable_mask) - 1;
+        
+        // Shift the variable portion off, and what's left is the frame.
+        int frame_index = variable_reference >> variable_encoding_frame_shift;
+
+        return { frame_index, variable_index, kind };
     }
 }
 
@@ -170,32 +252,41 @@ namespace handlers
         int count = 0;
         dap::StackTraceResponse response;
 
-        for (auto it = debugger.get_callstack().rbegin(); it != debugger.get_callstack().rend(); ++it)
+        // Remember what frame we are currently looking at so we can restore it if we need to change it to
+        // fetch information here.
+        int previous_frame = debugger.get_current_frame_index();
+
+        for (int frame_index = 0; frame_index < debugger.get_callstack().size(); frame_index++)
         {
-            dap::StackFrame frame;
+            dap::StackFrame dap_frame;
+            Debugger::StackFrame& debugger_frame = debugger.get_callstack()[frame_index];
 
-            frame.id = count;
+            if (debugger_frame.line_number == 0)
+            {
+                // We have not yet fetched this frame. Request it now. Note that this should only change the
+                // existing stack frame entries in-place and not invalidate this iterator.
+                debugger.set_current_frame_index(frame_index);
+                client::commands::change_stack(frame_index);
+                signals::stack_changed.wait();
+                signals::stack_changed.reset();
+            }
 
-            if (count == 0)
-            {
-                frame.line = debugger.get_current_line();
-            }
-            else
-            {
-                frame.line = 1;
-            }
+            dap_frame.id = count;
+            dap_frame.line = debugger_frame.line_number;
 
             dap::Source source;
-            source.path = util::class_to_source(it->class_name);
-            source.name = it->class_name;
+            source.path = util::class_to_source(debugger_frame.class_name);
+            source.name = debugger_frame.class_name;
 
-            frame.source = source;
-            frame.column = 0;
-            frame.name = it->function_name;
-            response.stackFrames.push_back(frame);
+            dap_frame.source = source;
+            dap_frame.column = 0;
+            dap_frame.name = debugger_frame.function_name;
+            response.stackFrames.push_back(dap_frame);
             ++count;
         }
 
+        // Restore the frame index to our original value.
+        debugger.set_current_frame_index(previous_frame);
         return response;
     }
 
@@ -204,37 +295,31 @@ namespace handlers
     {
 
         // TODO fixme
-        if (request.frameId != 0)
-        {
-            return dap::Error("Only the top frame is currently supported.");
-        }
+       // if (request.frameId != 0)
+       // {
+       //     return dap::Error("Only the top frame is currently supported.");
+       // }
 
         dap::Scope scope;
         scope.name = "Locals";
         scope.presentationHint = "locals";
-        scope.variablesReference = 1;
+        scope.variablesReference = util::encode_variable_reference(request.frameId, 0, Debugger::WatchKind::Local);
         dap::ScopesResponse response;
         response.scopes.push_back(scope);
+
         scope.name = "Globals";
         scope.presentationHint = {};
-
-         // TODO Fixme
-        scope.variablesReference = 0x4000'0001;
+        scope.variablesReference = util::encode_variable_reference(request.frameId, 0, Debugger::WatchKind::Global);
         response.scopes.push_back(scope);
         return response;
     }
 
     dap::ResponseOrError<dap::VariablesResponse> variables_handler(const dap::VariablesRequest& request)
     {
-        Debugger::WatchKind watch_kind = (request.variablesReference & 0x4000'0000) ? Debugger::WatchKind::Global : Debugger::WatchKind::Local;
-        Debugger::WatchList& watch_list = debugger.get_watch_list(watch_kind);
+        auto [frame_index, variable_index, watch_kind] = util::decode_variable_reference(request.variablesReference);
 
-        int variable = (request.variablesReference & ~0x4000'0000) - 1;
-        if (variable >= watch_list.size())
-        {
-            return dap::Error("Unknown variablesReference '%d'",
-                int(request.variablesReference));
-        }
+        // TODO Test if the frame has received variables yet, and stall til they are received if not.
+        const Debugger::WatchList& watch_list = debugger.get_current_stack_frame().get_watches(watch_kind);
 
         if (request.start.value(0) != 0 || request.count.value(0) != 0)
         {
@@ -244,11 +329,11 @@ namespace handlers
 
         dap::VariablesResponse response;
 
-        Debugger::WatchData& parent = watch_list[variable];
+        const Debugger::WatchData& parent = watch_list[variable_index];
 
         for (int child_index : parent.children)
         {
-            Debugger::WatchData& watch = watch_list[child_index];
+            const Debugger::WatchData& watch = watch_list[child_index];
             dap::Variable var;
             var.name = watch.name;
             var.type = watch.type;
@@ -263,12 +348,8 @@ namespace handlers
             }
             else
             {
-                int child_reference = child_index + 1;
-                if (watch_kind == Debugger::WatchKind::Global)
-                {
-                    child_reference |= 0x4000'0000;
-                }
-                var.variablesReference = watch.children.empty() ? 0 : (child_index + 1);
+                int child_reference = util::encode_variable_reference(frame_index, child_index, watch_kind);
+                var.variablesReference = watch.children.empty() ? 0 : child_reference;
             }
             response.variables.push_back(var);
         }
@@ -278,30 +359,45 @@ namespace handlers
 
     dap::PauseResponse pause_handler(const dap::PauseRequest& request)
     {
+        // Any code execution change results in fresh information from unreal so we need to reset
+        // to the top-most frame.
+        debugger.set_current_frame_index(0);
         client::commands::break_cmd();
         return {};
     }
 
     dap::ContinueResponse continue_handler(const dap::ContinueRequest& request)
     {
+        // Any code execution change results in fresh information from unreal so we need to reset
+        // to the top-most frame.
+        debugger.set_current_frame_index(0);
         client::commands::go();
         return {};
     }
 
     dap::NextResponse next_handler(const dap::NextRequest& request)
     {
+        // Any code execution change results in fresh information from unreal so we need to reset
+        // to the top-most frame.
+        debugger.set_current_frame_index(0);
         client::commands::step_over();
         return {};
     }
 
     dap::StepInResponse step_in_handler(const dap::StepInRequest& request)
     {
+        // Any code execution change results in fresh information from unreal so we need to reset
+        // to the top-most frame.
+        debugger.set_current_frame_index(0);
         client::commands::step_into();
         return {};
     }
 
     dap::StepOutResponse step_out_handler(const dap::StepOutRequest& request)
     {
+        // Any code execution change results in fresh information from unreal so we need to reset
+        // to the top-most frame.
+        debugger.set_current_frame_index(0);
         client::commands::step_outof();
         return {};
     }
@@ -328,7 +424,7 @@ void breakpoint_hit()
 void console_message(const std::string& msg)
 {
     dap::OutputEvent ev;
-    ev.output = msg;
+    ev.output = msg + "\r\n";
     ev.category = "console";
     session->send(ev);
 }
