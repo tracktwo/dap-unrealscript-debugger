@@ -114,6 +114,15 @@ namespace client
             send_command(cmd);
         }
 
+        void clear_watch()
+        {
+            Command cmd;
+
+            cmd.set_kind(Command_Kind_ClearWatch);
+            cmd.mutable_clear_watch();
+            send_command(cmd);
+        }
+
         void toggle_watch_info(bool b)
         {
             ToggleWatchInfo toggle_watch_info;

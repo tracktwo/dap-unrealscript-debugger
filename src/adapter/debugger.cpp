@@ -38,9 +38,7 @@ Debugger::WatchList& Debugger::StackFrame::get_watches(WatchKind kind)
     {
     case WatchKind::Local: return local_watches;
     case WatchKind::Global: return global_watches;
-    case WatchKind::User:
-        dap::writef(log_file, "Request for user watch in stack frame is not supported.\n");
-        [[fallthrough]];
+    case WatchKind::User: return user_watches;
     default:
         abort();
     }
@@ -50,15 +48,12 @@ Debugger::WatchList& Debugger::StackFrame::get_watches(WatchKind kind)
 // stack frame. User watches are part of the debugger state independent of frame.
 void Debugger::clear_watch(WatchKind kind)
 {
-    if (kind == WatchKind::User)
-        user_watches.clear();
-    else
-        callstack[current_frame].get_watches(kind).clear();
+    callstack[current_frame].get_watches(kind).clear();
 }
 
 void Debugger::add_watch(WatchKind kind, int index, int parent, const std::string& full_name, const std::string& value)
 {
-    WatchList& list = (kind == WatchKind::User) ? user_watches : callstack[current_frame].get_watches(kind);
+    WatchList& list = callstack[current_frame].get_watches(kind);
 
     // Ensure we have a root element before adding anything more. The root element is at index 0.
     if (list.empty())
@@ -220,8 +215,16 @@ void Debugger::finalize_callstack()
     callstack[0].fetched_watches = true;
 }
 
-int Debugger::find_user_watch(const std::string& var_name) const
+int Debugger::find_user_watch(int frame_index, const std::string& var_name) const
 {
+    if (frame_index >= callstack.size())
+    {
+        dap::writef(log_file, "Error: Requested user watch %s for invalid frame %d\n", var_name.c_str(), frame_index);
+        return -1;
+    }
+
+    const WatchList& user_watches = callstack[frame_index].user_watches;
+
     if (user_watches.empty() || user_watches[0].children.empty())
         return -1;
 

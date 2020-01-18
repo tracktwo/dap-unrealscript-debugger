@@ -405,6 +405,36 @@ namespace handlers
         return response;
     }
 
+    void fetch_watches(int frame_index)
+    {
+        int saved_frame_index = debugger.get_current_frame_index();
+        debugger.set_current_frame_index(frame_index);
+        debugger.set_state(Debugger::State::waiting_for_frame_watches);
+
+        // Request a stack change and wait for the watches to to be received.
+        client::commands::change_stack(frame_index);
+        signals::watches_received.wait();
+        signals::watches_received.reset();
+        debugger.set_state(Debugger::State::normal);
+
+        if (debugger.get_current_frame_index() != saved_frame_index)
+        {
+            // Reset the debugger's internal state to the original callstack.
+            // We don't need var information for this (we already have the previous
+            // frmae), so turn it off.
+            debugger.set_current_frame_index(saved_frame_index);
+            client::commands::toggle_watch_info(false);
+            debugger.set_state(Debugger::State::waiting_for_frame_line);
+            client::commands::change_stack(saved_frame_index);
+            signals::line_received.wait();
+            signals::line_received.reset();
+            client::commands::toggle_watch_info(true);
+            debugger.set_state(Debugger::State::normal);
+        }
+
+        debugger.get_callstack()[frame_index].fetched_watches = true;
+    }
+
     dap::ResponseOrError<dap::VariablesResponse> variables_handler(const dap::VariablesRequest& request)
     {
         log_timer("variables start");
@@ -419,35 +449,10 @@ namespace handlers
         // If we don't have watch info for this frame yet we need to collect it now.
         if (!debugger.get_callstack()[frame_index].fetched_watches)
         {
-            int saved_frame_index = debugger.get_current_frame_index();
-            debugger.set_current_frame_index(frame_index);
-            debugger.set_state(Debugger::State::waiting_for_frame_watches);
-
-            // Request a stack change and wait for the watches to to be received.
-            client::commands::change_stack(frame_index);
-            signals::watches_received.wait();
-            signals::watches_received.reset();
-            debugger.set_state(Debugger::State::normal);
-
-            if (debugger.get_current_frame_index() != saved_frame_index)
-            {
-                // Reset the debugger's internal state to the original callstack.
-                // We don't need var information for this (we already have the previous
-                // frmae), so turn it off.
-                debugger.set_current_frame_index(saved_frame_index);
-                client::commands::toggle_watch_info(false);
-                debugger.set_state(Debugger::State::waiting_for_frame_line);
-                client::commands::change_stack(saved_frame_index);
-                signals::line_received.wait();
-                signals::line_received.reset();
-                client::commands::toggle_watch_info(true);
-                debugger.set_state(Debugger::State::normal);
-            }
-
-            debugger.get_callstack()[frame_index].fetched_watches = true;
+            fetch_watches(frame_index);
         }
 
-        const Debugger::WatchList& watch_list = watch_kind == Debugger::WatchKind::User ? debugger.get_user_watches() : debugger.get_callstack()[frame_index].get_watches(watch_kind);
+        const Debugger::WatchList& watch_list = debugger.get_callstack()[frame_index].get_watches(watch_kind);
 
         if (request.start.value(0) != 0 || request.count.value(0) != 0)
         {
@@ -494,10 +499,10 @@ namespace handlers
         return response;
     }
 
-    static dap::EvaluateResponse make_user_watch_response(int index)
+    static dap::EvaluateResponse make_user_watch_response(int frame_index, int index)
     {
         dap::EvaluateResponse response;
-        const Debugger::WatchData& watch = debugger.get_user_watches()[index];
+        const Debugger::WatchData& watch = debugger.get_callstack()[frame_index].user_watches[index];
         response.type = watch.type;
         response.result = watch.value;
         if (!watch.children.empty())
@@ -518,13 +523,20 @@ namespace handlers
             return response;
         }
 
-        Debugger::WatchList& user_watches = debugger.get_user_watches();
+        int frame_index = request.frameId ? static_cast<int>(*request.frameId) : 0;
+
+        if (!debugger.get_callstack()[frame_index].fetched_watches)
+        {
+            fetch_watches(frame_index);
+        }
+
+        Debugger::WatchList& user_watches = debugger.get_callstack()[frame_index].user_watches;
 
         // If we have existing watches try to find it in the list first. It will be a child
             // of the root node if so, we don't need to search arbitrary children throughout the list.
-        if (int index = debugger.find_user_watch(request.expression); index >= 0)
+        if (int index = debugger.find_user_watch(frame_index, request.expression); index >= 0)
         {
-            return make_user_watch_response(index);
+            return make_user_watch_response(frame_index, index);
         }
 
         // If we've failed to find this watch then we need to request it.
@@ -535,9 +547,9 @@ namespace handlers
         debugger.set_state(Debugger::State::normal);
 
         // Now find the watch.
-        if (int index = debugger.find_user_watch(request.expression); index >= 0)
+        if (int index = debugger.find_user_watch(frame_index, request.expression); index >= 0)
         {
-            return make_user_watch_response(index);
+            return make_user_watch_response(frame_index, index);
         }
 
         // We have failed again -- this watch must be bad.
@@ -561,6 +573,7 @@ namespace handlers
             ;
 
         client::commands::toggle_watch_info(true);
+        client::commands::clear_watch();
 
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.
@@ -577,6 +590,7 @@ namespace handlers
             ;
 
         client::commands::toggle_watch_info(true);
+        client::commands::clear_watch();
 
         log_timer("next start");
         // Any code execution change results in fresh information from unreal so we need to reset
@@ -595,6 +609,7 @@ namespace handlers
             ;
 
         client::commands::toggle_watch_info(true);
+        client::commands::clear_watch();
 
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.
@@ -611,6 +626,7 @@ namespace handlers
             ;
 
         client::commands::toggle_watch_info(true);
+        client::commands::clear_watch();
 
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.

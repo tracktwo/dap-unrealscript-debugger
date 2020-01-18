@@ -57,6 +57,7 @@ public:
         std::string function_name = "";
         WatchList local_watches;
         WatchList global_watches;
+        WatchList user_watches;
         bool fetched_watches = false;
     };
 
@@ -76,12 +77,10 @@ public:
     void finalize_callstack();
     void set_state(State s) { state = s; }
     State get_state() const { return state; }
-    WatchList& get_user_watches() { return user_watches; }
-    int find_user_watch(const std::string& var_name) const;
+    int find_user_watch(int frame_index, const std::string& var_name) const;
 
 private:
 
-    WatchList user_watches;
     std::vector<StackFrame> callstack;
     int current_frame = 0;
     std::atomic<State> state;
