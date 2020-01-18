@@ -44,6 +44,11 @@ void DebuggerService::clear_a_watch(int watch_kind)
     if (!send_watch_info_)
         return;
 
+    if (pending_unlocks_[watch_kind])
+    {
+        pending_unlocks_[watch_kind]->clear_watch_info();
+    }
+
     Event ev;
     ev.set_kind(Event_Kind_ClearAWatch);
     ev.mutable_clear_a_watch()->set_watch_type(watch_kind);
@@ -77,16 +82,14 @@ int DebuggerService::add_a_watch(int watch_kind, int parent, const char* name, c
     if (!send_watch_info_)
         return idx;
 
-    Event ev;
+    assert(pending_unlocks_[watch_kind]);
 
-    ev.set_kind(Event_Kind_AddAWatch);
-    AddAWatch* add = ev.mutable_add_a_watch();
-    add->set_watch_type(watch_kind);
-    add->set_parent_index(parent);
-    add->set_name(name);
-    add->set_value(value);
-    add->set_assigned_index(idx);
-    send_event(ev);
+    AddAWatch *new_watch = pending_unlocks_[watch_kind]->add_watch_info();
+    new_watch->set_watch_type(watch_kind);
+    new_watch->set_parent_index(parent);
+    new_watch->set_name(name);
+    new_watch->set_value(value);
+    new_watch->set_assigned_index(idx);
 
     return idx;
 }
@@ -95,6 +98,13 @@ void DebuggerService::lock_list(int watch_kind)
 {
     if (!send_watch_info_)
         return;
+
+    // Create a pending unlock_list message. All watches we receive will be queued up into
+    // this message to be sent when we unlock.
+    assert(!pending_unlocks_[watch_kind]);
+    unreal_debugger::events::UnlockList unlock;
+    unlock.set_watch_type(watch_kind);
+    pending_unlocks_[watch_kind] = std::move(unlock);
 
     Event ev;
     ev.set_kind(Event_Kind_LockList);
@@ -107,9 +117,12 @@ void DebuggerService::unlock_list(int watch_kind)
     if (!send_watch_info_)
         return;
 
+    assert(pending_unlocks_[watch_kind]);
+
     Event ev;
     ev.set_kind(Event_Kind_UnlockList);
-    ev.mutable_unlock_list()->set_watch_type(watch_kind);
+    *ev.mutable_unlock_list() = *pending_unlocks_[watch_kind];
+    pending_unlocks_[watch_kind] = {};
     send_event(ev);
 }
 

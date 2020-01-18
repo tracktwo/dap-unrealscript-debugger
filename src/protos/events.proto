@@ -47,6 +47,7 @@ message LockList
 message UnlockList
 {
     int32 watch_type = 1;
+    repeated AddAWatch watch_info = 2;
 }
 
 message AddBreakpoint
@@ -103,19 +104,18 @@ message Event
         BuildHierarchy = 2;
         ClearHierarchy = 3;
         AddClassToHierarchy = 4;
-        ClearAWatch = 5;
-        AddAWatch = 6;
-        LockList = 7;
-        UnlockList = 8;
-        AddBreakpoint = 9;
-        RemoveBreakpoint = 10;
-        EditorLoadClass = 11;
-        EditorGotoLine = 12;
-        AddLineToLog = 13;
-        CallStackClear = 14;
-        CallStackAdd = 15;
-        SetCurrentObjectName = 16;
-        Terminated = 17;
+        LockList = 5;
+        UnlockList = 6;
+        ClearAWatch = 7;
+        AddBreakpoint = 8;
+        RemoveBreakpoint = 9;
+        EditorLoadClass = 10;
+        EditorGotoLine = 11;
+        AddLineToLog = 12;
+        CallStackClear = 13;
+        CallStackAdd = 14;
+        SetCurrentObjectName = 15;
+        Terminated = 16;
     }
 
     Kind kind = 1;
@@ -124,18 +124,17 @@ message Event
         BuildHierarchy build_hierarchy = 3;
         ClearHierarchy clear_hierarchy = 4;
         AddClassToHierarchy add_class_to_hierarchy = 5;
-        ClearAWatch clear_a_watch = 6;
-        AddAWatch add_a_watch = 7;
-        LockList lock_list = 8;
-        UnlockList unlock_list = 9;
-        AddBreakpoint add_breakpoint = 10;
-        RemoveBreakpoint remove_breakpoint = 11;
-        EditorLoadClass editor_load_class = 12;
-        EditorGotoLine editor_goto_line = 13;
-        AddLineToLog add_line_to_log = 14;
-        CallStackClear call_stack_clear = 15;
-        CallStackAdd call_stack_add = 16;
-        SetCurrentObjectName set_current_object_name = 17;
-        Terminated terminated = 18;
+        LockList lock_list = 6;
+        UnlockList unlock_list = 7;
+        ClearAWatch clear_a_watch = 8;
+        AddBreakpoint add_breakpoint = 9;
+        RemoveBreakpoint remove_breakpoint = 10;
+        EditorLoadClass editor_load_class = 11;
+        EditorGotoLine editor_goto_line = 12;
+        AddLineToLog add_line_to_log = 13;
+        CallStackClear call_stack_clear = 14;
+        CallStackAdd call_stack_add = 15;
+        SetCurrentObjectName set_current_object_name = 16;
+        Terminated terminated = 17;
     }
 }

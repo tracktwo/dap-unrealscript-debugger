@@ -7,6 +7,7 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <atomic>
+#include <optional>
 
 #include "events.pb.h"
 #include "commands.pb.h"
@@ -104,6 +105,7 @@ private:
    // watch kinds unreal implements. These values are used by clear_a_watch
     // and add_a_watch.
     int watch_indices_[3];
+    std::optional<unreal_debugger::events::UnlockList> pending_unlocks_[3];
 
     struct SerializedMessage
     {

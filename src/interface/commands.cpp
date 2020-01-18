@@ -226,5 +226,11 @@ void DebuggerService::step_out_of(const unreal_debugger::commands::StepOutOf& cm
 void DebuggerService::toggle_watch_info(const unreal_debugger::commands::ToggleWatchInfo& cmd)
 {
     send_watch_info_ = cmd.send_watch_info();
+    if (!send_watch_info_)
+    {
+        pending_unlocks_[0] = {};
+        pending_unlocks_[1] = {};
+        pending_unlocks_[2] = {};
+    }
 }
 

@@ -7,6 +7,7 @@
 
 #include <io.h>
 #include <fcntl.h>
+#include <boost/asio.hpp>
 #include <boost/asio/ip/tcp.hpp>
 
 static const int default_port = 10077;
@@ -36,7 +37,7 @@ void receive_next_event()
     {
         std::lock_guard<std::mutex> lock{ client_mutex };
 
-        sock->async_receive(boost::asio::buffer(&next_event.len, 4), [](const boost::system::error_code& ec, std::size_t len) {
+        boost::asio::async_read(*sock, boost::asio::buffer(&next_event.len, 4), [](const boost::system::error_code& ec, std::size_t len) {
 
             {
                 // Reaquire the lock before dispatching any events.
@@ -59,7 +60,7 @@ void receive_next_event()
                 // TODO Reuse existing buffer if it's big enough.
                 next_event.bytes = std::make_unique<char[]>(next_event.len);
 
-                sock->async_receive(boost::asio::buffer(next_event.bytes.get(), next_event.len), [](const boost::system::error_code& ec, std::size_t len) {
+                boost::asio::async_read(*sock, boost::asio::buffer(next_event.bytes.get(), next_event.len), [](const boost::system::error_code& ec, std::size_t len) {
                     if (ec)
                     {
                         dap::writef(log_file, "receiving event body error: %s", ec.message().c_str());
@@ -98,7 +99,7 @@ void send_next_message()
     auto&& next_msg = send_queue.front();
 
     // Begin the async send of the front-most message
-    sock->async_send(asio::buffer(&next_msg.len, 4), [](const boost::system::error_code& ec, std::size_t n) {
+    async_write(*sock, asio::buffer(&next_msg.len, 4), [](const boost::system::error_code& ec, std::size_t n) {
         if (ec)
         {
             dap::writef(log_file, "sending command header received error: %s", ec.message().c_str());
@@ -111,7 +112,7 @@ void send_next_message()
 
         // Now send the message body
         auto&& next_msg = send_queue.front();
-        sock->async_send(asio::buffer(next_msg.bytes.get(), next_msg.len), [len = next_msg.len](const boost::system::error_code& ec, std::size_t n) {
+        async_write(*sock, asio::buffer(next_msg.bytes.get(), next_msg.len), [len = next_msg.len](const boost::system::error_code& ec, std::size_t n) {
             bool is_empty = false;
 
             {

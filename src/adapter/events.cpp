@@ -34,11 +34,6 @@ void clear_a_watch(const ClearAWatch& ev)
     debugger.clear_watch(static_cast<Debugger::WatchKind>(ev.watch_type()));
 }
 
-void add_a_watch(const AddAWatch& ev)
-{
-    debugger.add_watch(static_cast<Debugger::WatchKind>(ev.watch_type()), ev.assigned_index(), ev.parent_index(), ev.name(), ev.value());
-}
-
 void lock_list(const LockList& ev)
 {
     debugger.lock_list(static_cast<Debugger::WatchKind>(ev.watch_type()));
@@ -46,6 +41,11 @@ void lock_list(const LockList& ev)
 
 void unlock_list(const UnlockList& ev)
 {
+    for (int i = 0; i < ev.watch_info_size(); ++i)
+    {
+        const AddAWatch& watch_info = ev.watch_info(i);
+        debugger.add_watch(static_cast<Debugger::WatchKind>(watch_info.watch_type()), watch_info.assigned_index(), watch_info.parent_index(), watch_info.name(), watch_info.value());
+    }
     debugger.unlock_list(static_cast<Debugger::WatchKind>(ev.watch_type()));
 }
 
@@ -134,7 +134,6 @@ void dispatch_event(const Event& ev)
     case Event_Kind_ClearHierarchy:         dispatch_event(ev, &Event::has_clear_hierarchy,         &Event::clear_hierarchy,            &clear_hierarchy);          break;
     case Event_Kind_AddClassToHierarchy:    dispatch_event(ev, &Event::has_add_class_to_hierarchy,  &Event::add_class_to_hierarchy,     &add_class_to_hierarchy);   break;
     case Event_Kind_ClearAWatch:            dispatch_event(ev, &Event::has_clear_a_watch,           &Event::clear_a_watch,              &clear_a_watch);            break;
-    case Event_Kind_AddAWatch:              dispatch_event(ev, &Event::has_add_a_watch,             &Event::add_a_watch,                &add_a_watch);              break;
     case Event_Kind_LockList:               dispatch_event(ev, &Event::has_lock_list,               &Event::lock_list,                  &lock_list);                break;
     case Event_Kind_UnlockList:             dispatch_event(ev, &Event::has_unlock_list,             &Event::unlock_list,                &unlock_list);              break;
     case Event_Kind_AddBreakpoint:          dispatch_event(ev, &Event::has_add_breakpoint,          &Event::add_breakpoint,             &add_breakpoint);           break;

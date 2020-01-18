@@ -193,10 +193,6 @@ namespace handlers
     {
         dap::InitializeResponse response;
         response.supportsDelayedStackTraceLoading = true;
-
-        // Now that we have a fresh connection to the client, turn off watch info
-        // on the debug interface so we don't get extra watch info until we want it.
-        client::commands::toggle_watch_info(false);
         return response;
     }
 
@@ -291,6 +287,7 @@ namespace handlers
         // Remember what frame we are currently looking at so we can restore it if we need to change it to
         // fetch information here.
         int previous_frame = debugger.get_current_frame_index();
+        bool disabled_watch_info = false;
 
         // Loop over frames requested by the client. The request may start at a frame > 0, and may not request all frames.
         for (int frame_index = *request.startFrame; frame_index < debugger.get_callstack().size(); ++frame_index)
@@ -303,6 +300,14 @@ namespace handlers
                 // We have not yet fetched this frame's line number. Request it now.
                 debugger.set_current_frame_index(frame_index);
                 debugger.set_state(Debugger::State::waiting_for_frame_line);
+
+                // Tell the debugger interface not to bother sending watch info: we only want line numbers
+                // when swapping frames to build a call stack.
+                if (!disabled_watch_info)
+                {
+                    client::commands::toggle_watch_info(false);
+                    disabled_watch_info = true;
+                }
 
                 // Request a stack change and wait for the line number to be received.
                 client::commands::change_stack(frame_index);
@@ -332,6 +337,12 @@ namespace handlers
 
         // Restore the frame index to our original value.
         debugger.set_current_frame_index(previous_frame);
+
+        // If we asked the debugger to stop sending watch info, turn it back on now
+        if (disabled_watch_info)
+        {
+            client::commands::toggle_watch_info(true);
+        }
 
         response.totalFrames = debugger.get_callstack().size();
         log_timer("stack trace end");
@@ -391,7 +402,6 @@ namespace handlers
         {
             int saved_frame_index = debugger.get_current_frame_index();
             debugger.set_current_frame_index(frame_index);
-            client::commands::toggle_watch_info(true);
             debugger.set_state(Debugger::State::waiting_for_frame_watches);
 
             // Request a stack change and wait for the watches to to be received.
@@ -401,7 +411,6 @@ namespace handlers
             debugger.set_state(Debugger::State::normal);
             debugger.set_current_frame_index(saved_frame_index);
             debugger.get_callstack()[frame_index].fetched_watches = true;
-            client::commands::toggle_watch_info(false);
         }
 
         const Debugger::WatchList& watch_list = debugger.get_callstack()[frame_index].get_watches(watch_kind);
@@ -465,6 +474,8 @@ namespace handlers
         while (debugger.get_state() != Debugger::State::normal)
             ;
 
+        client::commands::toggle_watch_info(true);
+
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.
         debugger.set_current_frame_index(0);
@@ -478,6 +489,8 @@ namespace handlers
     {
         while (debugger.get_state() != Debugger::State::normal)
             ;
+
+        client::commands::toggle_watch_info(true);
 
         log_timer("next start");
         // Any code execution change results in fresh information from unreal so we need to reset
@@ -495,6 +508,8 @@ namespace handlers
         while (debugger.get_state() != Debugger::State::normal)
             ;
 
+        client::commands::toggle_watch_info(true);
+
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.
         debugger.set_current_frame_index(0);
@@ -508,6 +523,8 @@ namespace handlers
     {
         while (debugger.get_state() != Debugger::State::normal)
             ;
+
+        client::commands::toggle_watch_info(true);
 
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.

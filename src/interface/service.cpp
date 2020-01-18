@@ -60,7 +60,7 @@ void DebuggerService::receive_next_message()
 {
     {
         Lock lock{mu_};
-        socket_->async_receive(boost::asio::buffer(&next_message_.len, 4), [this](const boost::system::error_code& ec, std::size_t len) {
+        async_read(*socket_, boost::asio::buffer(&next_message_.len, 4), [this](const boost::system::error_code& ec, std::size_t len) {
             if (ec)
             {
                 printf("UnrealDebugger: Receiving command header error: %s\n", ec.message().c_str());
@@ -75,7 +75,7 @@ void DebuggerService::receive_next_message()
             }
 
             next_message_.bytes = std::make_unique<char[]>(next_message_.len);
-            socket_->async_receive(boost::asio::buffer(next_message_.bytes.get(), next_message_.len), [this](const boost::system::error_code& ec, std::size_t len) {
+            async_read(*socket_, boost::asio::buffer(next_message_.bytes.get(), next_message_.len), [this](const boost::system::error_code& ec, std::size_t len) {
                 unreal_debugger::commands::Command cmd;
 
                 if (ec)
@@ -129,8 +129,7 @@ void DebuggerService::send_event(const unreal_debugger::events::Event& msg)
     {
         Lock lock(mu_);
 
-       if (msg.kind() != unreal_debugger::events::Event_Kind_AddAWatch)
-            printf("Sending event %s\n", unreal_debugger::events::Event::Kind_Name(msg.kind()).c_str());
+        printf("Sending event %s\n", unreal_debugger::events::Event::Kind_Name(msg.kind()).c_str());
         // Serialize the message into a buffer that we can send over the wire.
         std::size_t len = msg.ByteSizeLong();
         std::unique_ptr<char[]> buf = std::make_unique<char[]>(len);
@@ -158,7 +157,7 @@ void DebuggerService::send_next_message()
     assert(!send_queue_.empty());
     auto&& next_msg = send_queue_.front();
 
-    socket_->async_send(boost::asio::buffer(&next_msg.len, 4), [this](const boost::system::error_code& ec, std::size_t n) {
+    async_write(*socket_, boost::asio::buffer(&next_msg.len, 4), [this](const boost::system::error_code& ec, std::size_t n) {
         if (ec)
         {
             printf("UnrealDebugger: Sending event header error: %s\n", ec.message().c_str());
@@ -174,7 +173,7 @@ void DebuggerService::send_next_message()
 
         auto&& next_msg = send_queue_.front();
 
-        socket_->async_send(boost::asio::buffer(next_msg.bytes.get(), next_msg.len), [this, len = next_msg.len](boost::system::error_code ec, std::size_t n) {
+        async_write(*socket_, boost::asio::buffer(next_msg.bytes.get(), next_msg.len), [this, len = next_msg.len](boost::system::error_code ec, std::size_t n) {
             bool is_empty = false;
             {
                 Lock lock(mu_);
