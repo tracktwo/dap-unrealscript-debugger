@@ -209,7 +209,4 @@ void Debugger::finalize_callstack()
     // pop off the now redundant duplicated entry we have on the end of the stack.
     // This leaves the stack with index 0 as the top-most entry, and with complete info.
     callstack.pop_back();
-
-    // We have watch info for the top frame, unreal sent it before we even got the call stack.
-    callstack[0].fetched_watches = true;
 }

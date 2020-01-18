@@ -53,6 +53,7 @@ set (DBGIFACE_HDRS
 )
 
 add_library(DebuggerInterface SHARED ${DBGIFACE_SRCS} ${DBGIFACE_HDRS})
+target_compile_options(DebuggerInterface PRIVATE "-permissive-")
 target_link_libraries(DebuggerInterface PRIVATE protobuf::libprotobuf)
 target_link_options(DebuggerInterface PRIVATE "/MAP")
 

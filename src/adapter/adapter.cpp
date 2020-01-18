@@ -193,6 +193,10 @@ namespace handlers
     {
         dap::InitializeResponse response;
         response.supportsDelayedStackTraceLoading = true;
+
+        // Now that we have a fresh connection to the client, turn off watch info
+        // on the debug interface so we don't get extra watch info until we want it.
+        client::commands::toggle_watch_info(false);
         return response;
     }
 
@@ -279,12 +283,17 @@ namespace handlers
         int count = 0;
         dap::StackTraceResponse response;
 
+        if (debugger.get_state() == Debugger::State::busy)
+        {
+            signals::breakpoint_hit.wait();
+        }
+
         // Remember what frame we are currently looking at so we can restore it if we need to change it to
         // fetch information here.
         int previous_frame = debugger.get_current_frame_index();
-        bool disabled_watch_info = false;
 
-        for (int frame_index = *request.startFrame; frame_index < debugger.get_callstack().size(); frame_index++)
+        // Loop over frames requested by the client. The request may start at a frame > 0, and may not request all frames.
+        for (int frame_index = *request.startFrame; frame_index < debugger.get_callstack().size(); ++frame_index)
         {
             dap::StackFrame dap_frame;
             Debugger::StackFrame& debugger_frame = debugger.get_callstack()[frame_index];
@@ -295,14 +304,6 @@ namespace handlers
                 debugger.set_current_frame_index(frame_index);
                 debugger.set_state(Debugger::State::waiting_for_frame_line);
 
-                // Tell the debugger interface not to bother sending watch info: we only want line numbers
-                // when swapping frames.
-                if (!disabled_watch_info)
-                {
-                    client::commands::toggle_watch_info(false);
-                    disabled_watch_info = true;
-                }
-
                 // Request a stack change and wait for the line number to be received.
                 client::commands::change_stack(frame_index);
                 signals::line_received.wait();
@@ -310,7 +311,7 @@ namespace handlers
                 debugger.set_state(Debugger::State::normal);
             }
 
-            dap_frame.id = count;
+            dap_frame.id = frame_index;
             dap_frame.line = debugger_frame.line_number;
 
             dap::Source source;
@@ -321,9 +322,9 @@ namespace handlers
             dap_frame.column = 0;
             dap_frame.name = debugger_frame.function_name;
             response.stackFrames.push_back(dap_frame);
-            ++count;
 
-            if (count >= *request.levels)
+            // If we have reached the number of frames requested by the client we can stop.
+            if (++count >= *request.levels)
             {
                 break;
             }
@@ -331,12 +332,6 @@ namespace handlers
 
         // Restore the frame index to our original value.
         debugger.set_current_frame_index(previous_frame);
-
-        // If we asked the debugger to stop sending watch info, turn it back on now
-        if (disabled_watch_info)
-        {
-            client::commands::toggle_watch_info(true);
-        }
 
         response.totalFrames = debugger.get_callstack().size();
         log_timer("stack trace end");
@@ -349,6 +344,11 @@ namespace handlers
     {
 
         log_timer("scopes start");
+
+        if (debugger.get_state() == Debugger::State::busy)
+        {
+            signals::breakpoint_hit.wait();
+        }
 
         dap::Scope scope;
         scope.name = "Locals";
@@ -378,6 +378,12 @@ namespace handlers
     dap::ResponseOrError<dap::VariablesResponse> variables_handler(const dap::VariablesRequest& request)
     {
         log_timer("variables start");
+
+        if (debugger.get_state() == Debugger::State::busy)
+        {
+            signals::breakpoint_hit.wait();
+        }
+
         auto [frame_index, variable_index, watch_kind] = util::decode_variable_reference(request.variablesReference);
 
         // If we don't have watch info for this frame yet we need to collect it now.
@@ -385,6 +391,7 @@ namespace handlers
         {
             int saved_frame_index = debugger.get_current_frame_index();
             debugger.set_current_frame_index(frame_index);
+            client::commands::toggle_watch_info(true);
             debugger.set_state(Debugger::State::waiting_for_frame_watches);
 
             // Request a stack change and wait for the watches to to be received.
@@ -394,6 +401,7 @@ namespace handlers
             debugger.set_state(Debugger::State::normal);
             debugger.set_current_frame_index(saved_frame_index);
             debugger.get_callstack()[frame_index].fetched_watches = true;
+            client::commands::toggle_watch_info(false);
         }
 
         const Debugger::WatchList& watch_list = debugger.get_callstack()[frame_index].get_watches(watch_kind);
@@ -454,20 +462,29 @@ namespace handlers
 
     dap::ContinueResponse continue_handler(const dap::ContinueRequest& request)
     {
+        while (debugger.get_state() != Debugger::State::normal)
+            ;
+
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.
         debugger.set_current_frame_index(0);
+        debugger.set_state(Debugger::State::busy);
+        signals::breakpoint_hit.reset();
         client::commands::go();
         return {};
     }
 
     dap::NextResponse next_handler(const dap::NextRequest& request)
     {
+        while (debugger.get_state() != Debugger::State::normal)
+            ;
 
         log_timer("next start");
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.
         debugger.set_current_frame_index(0);
+        debugger.set_state(Debugger::State::busy);
+        signals::breakpoint_hit.reset();
         client::commands::step_over();
         log_timer("next end");
         return {};
@@ -475,18 +492,28 @@ namespace handlers
 
     dap::StepInResponse step_in_handler(const dap::StepInRequest& request)
     {
+        while (debugger.get_state() != Debugger::State::normal)
+            ;
+
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.
         debugger.set_current_frame_index(0);
+        debugger.set_state(Debugger::State::busy);
+        signals::breakpoint_hit.reset();
         client::commands::step_into();
         return {};
     }
 
     dap::StepOutResponse step_out_handler(const dap::StepOutRequest& request)
     {
+        while (debugger.get_state() != Debugger::State::normal)
+            ;
+
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.
         debugger.set_current_frame_index(0);
+        debugger.set_state(Debugger::State::busy);
+        signals::breakpoint_hit.reset();
         client::commands::step_outof();
         return {};
     }
@@ -504,6 +531,14 @@ namespace sent_handlers
 void breakpoint_hit()
 {
     log_timer("breakpoint start");
+    if (!session)
+        return;
+
+    if (debugger.get_state() == Debugger::State::busy)
+        debugger.set_state(Debugger::State::normal);
+
+    signals::breakpoint_hit.fire();
+
     dap::StoppedEvent ev;
     ev.reason = "breakpoint";
     ev.threadId = unreal_thread_id;
@@ -514,6 +549,9 @@ void breakpoint_hit()
 // Tell the debug client that the debugger has produced some log output.
 void console_message(const std::string& msg)
 {
+    if (!session)
+        return;
+
     dap::OutputEvent ev;
     ev.output = msg + "\r\n";
     ev.category = "console";
@@ -524,6 +562,8 @@ void console_message(const std::string& msg)
 // our shutdown process.
 void debugger_terminated()
 {
+    if (!session)
+        return;
     dap::TerminatedEvent ev;
     session->send(ev);
     stop_debugger();

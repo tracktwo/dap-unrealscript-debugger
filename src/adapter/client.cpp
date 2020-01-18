@@ -21,6 +21,7 @@ SerializedCommand next_event;
 namespace signals {
     signal line_received;
     signal watches_received;
+    signal breakpoint_hit;
 }
 
 std::mutex client_mutex;

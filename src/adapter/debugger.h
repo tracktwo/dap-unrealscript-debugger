@@ -22,6 +22,7 @@ public:
     enum class State
     {
         normal,
+        busy,
         waiting_for_frame_line,
         waiting_for_frame_watches
     };
@@ -80,7 +81,7 @@ private:
     WatchList user_watches;
     std::vector<StackFrame> callstack;
     int current_frame = 0;
-    State state;
+    std::atomic<State> state;
     int watch_lock_depth = 0;
 };
 

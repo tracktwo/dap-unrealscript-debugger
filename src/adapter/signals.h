@@ -7,6 +7,8 @@ namespace signals
         void wait()
         {
             std::unique_lock<std::mutex> lock(mutex);
+            if (fired)
+                return;
             cv.wait(lock, [this] { return fired; });
         }
 
@@ -31,5 +33,6 @@ namespace signals
 
     extern signal line_received;
     extern signal watches_received;
+    extern signal breakpoint_hit;
 }
 

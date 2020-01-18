@@ -129,8 +129,8 @@ void DebuggerService::send_event(const unreal_debugger::events::Event& msg)
     {
         Lock lock(mu_);
 
-       // if (msg.kind() != unreal_debugger::events::Event_Kind_AddAWatch)
-       //     printf("Sending event %s\n", unreal_debugger::events::Event::Kind_Name(msg.kind()).c_str());
+       if (msg.kind() != unreal_debugger::events::Event_Kind_AddAWatch)
+            printf("Sending event %s\n", unreal_debugger::events::Event::Kind_Name(msg.kind()).c_str());
         // Serialize the message into a buffer that we can send over the wire.
         std::size_t len = msg.ByteSizeLong();
         std::unique_ptr<char[]> buf = std::make_unique<char[]>(len);
