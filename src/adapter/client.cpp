@@ -20,6 +20,7 @@ SerializedCommand next_event;
 
 namespace signals {
     signal line_received;
+    signal watches_received;
 }
 
 std::mutex client_mutex;
@@ -149,7 +150,7 @@ void send_command(const unreal_debugger::commands::Command& cmd)
     {
         std::lock_guard<std::mutex> lock(client_mutex);
 
-        dap::writef(log_file, "Sending command %s\n", cmd.Kind_Name(cmd.kind()).c_str());
+      //  dap::writef(log_file, "Sending command %s\n", cmd.Kind_Name(cmd.kind()).c_str());
         std::size_t len = cmd.ByteSizeLong();
         std::unique_ptr<char[]> buf = std::make_unique<char[]>(len);
         cmd.SerializeToArray(buf.get(), len);

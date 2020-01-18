@@ -22,7 +22,8 @@ public:
     enum class State
     {
         normal,
-        waiting_for_frame_line
+        waiting_for_frame_line,
+        waiting_for_frame_watches
     };
 
     // Watch lists
@@ -54,12 +55,16 @@ public:
         std::string function_name = "";
         WatchList local_watches;
         WatchList global_watches;
+        bool fetched_watches = false;
     };
 
 
     std::vector<StackFrame>& get_callstack() { return callstack; }
     void clear_watch(WatchKind kind);
     void add_watch(WatchKind kind, int index, int parent, const std::string& name, const std::string& value);
+
+    void lock_list(WatchKind kind);
+    void unlock_list(WatchKind kind);
 
     void clear_callstack();
     void add_callstack(const std::string& name);
@@ -73,10 +78,10 @@ public:
 private:
 
     WatchList user_watches;
-
     std::vector<StackFrame> callstack;
     int current_frame = 0;
     State state;
+    int watch_lock_depth = 0;
 };
 
 extern Debugger debugger;

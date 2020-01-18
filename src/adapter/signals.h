@@ -30,5 +30,6 @@ namespace signals
     };
 
     extern signal line_received;
+    extern signal watches_received;
 }
 

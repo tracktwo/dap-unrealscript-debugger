@@ -41,12 +41,12 @@ void add_a_watch(const AddAWatch& ev)
 
 void lock_list(const LockList& ev)
 {
-
+    debugger.lock_list(static_cast<Debugger::WatchKind>(ev.watch_type()));
 }
 
 void unlock_list(const UnlockList& ev)
 {
-
+    debugger.unlock_list(static_cast<Debugger::WatchKind>(ev.watch_type()));
 }
 
 void add_breakpoint(const AddBreakpoint& ev)

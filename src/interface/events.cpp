@@ -47,6 +47,7 @@ void DebuggerService::clear_a_watch(int watch_kind)
     Event ev;
     ev.set_kind(Event_Kind_ClearAWatch);
     ev.mutable_clear_a_watch()->set_watch_type(watch_kind);
+    send_event(ev);
 }
 
 // AddAWatch is special : it's the only entry point from unreal that accepts a return value.

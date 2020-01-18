@@ -2,6 +2,7 @@
 #include "dap/io.h"
 #include "client.h"
 #include "debugger.h"
+#include "signals.h"
 
 // Unreal watch names are of the form "VarName ( Type, Address )"
 // Split out and return the 'name' and 'type' portions.
@@ -97,6 +98,24 @@ void Debugger::add_watch(WatchKind kind, int index, int parent, const std::strin
     }
 }
 
+void Debugger::lock_list(WatchKind kind)
+{
+    ++watch_lock_depth;
+}
+
+void Debugger::unlock_list(WatchKind kind)
+{
+    --watch_lock_depth;
+
+    // If we have just unlocked the last watch list then we are done receiving watches. If the debugger
+    // is waiting for the watch list to complete, signal that it's done.
+    if (watch_lock_depth == 0 && state == State::waiting_for_frame_watches)
+    {
+        signals::watches_received.fire();
+    }
+}
+
+
 // "clear" the callstack. Due to the order Unreal provides information we don't want to just delete
 // any existing callstack: after breaking at a breakpoint unreal sends the current class name, current
 // line number, and all watches before clearing and sending call stack information. For DAP we want to
@@ -180,10 +199,17 @@ void Debugger::finalize_callstack()
     // Copy the line number to the top-most frame.
     top_frame.line_number = bottom_frame.line_number;
 
+    // Move the watch info to the top-most frame.
+    std::swap(top_frame.local_watches, bottom_frame.local_watches);
+    std::swap(top_frame.global_watches, bottom_frame.global_watches);
+
     // Reverse the call stack so our 0th index is the top-most entry
     std::reverse(callstack.begin(), callstack.end());
    
     // pop off the now redundant duplicated entry we have on the end of the stack.
     // This leaves the stack with index 0 as the top-most entry, and with complete info.
     callstack.pop_back();
+
+    // We have watch info for the top frame, unreal sent it before we even got the call stack.
+    callstack[0].fetched_watches = true;
 }

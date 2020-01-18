@@ -119,6 +119,14 @@ void DebuggerService::dispatch_command(const Command& cmd)
             return;
         }
         break;
+
+    case Command_Kind_ToggleWatchInfo:
+        if (cmd.has_toggle_watch_info())
+        {
+            toggle_watch_info(cmd.toggle_watch_info());
+            return;
+        }
+        break;
     }
 
     // If we get here then either we have an invalid command: either the payload didn't match

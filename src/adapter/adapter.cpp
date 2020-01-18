@@ -15,6 +15,24 @@
 #include "debugger.h"
 #include "signals.h"
 
+LARGE_INTEGER last_time;
+LARGE_INTEGER freq;
+
+static void init_timer()
+{
+    QueryPerformanceFrequency(&freq);
+}
+static void log_timer(const char* msg)
+{
+    LARGE_INTEGER lint, elapsed;
+    QueryPerformanceCounter(&lint);
+    elapsed.QuadPart = lint.QuadPart - last_time.QuadPart;
+    elapsed.QuadPart *= 1'000'000;
+    elapsed.QuadPart /= freq.QuadPart;
+    dap::writef(log_file, "%s %lldus\n", msg, elapsed.QuadPart);
+    last_time = lint;
+}
+
 std::unique_ptr<dap::Session> session;
 std::unique_ptr<dap::net::Server> server;
 
@@ -60,6 +78,7 @@ namespace util
 
     // FIXME Remove
     static const char* dev_root = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\XCOM 2 War of the Chosen SDK\\Development\\Src\\";
+    static const char* mod_root = "C:\\Users\\jonathan\\xcom\\roguecom\\roguecom\\Src\\";
 
     std::string class_to_source(const std::string& class_name)
     {
@@ -67,7 +86,14 @@ namespace util
         std::string package = class_name.substr(0, idx);
         std::string file = class_name.substr(idx + 1);
 
-        return dev_root + package + "\\Classes\\" + file + ".uc";
+        if (package == "RogueCOM")
+        {
+            return mod_root + package + "\\Classes\\" + file + ".uc";
+        }
+        else
+        {
+            return dev_root + package + "\\Classes\\" + file + ".uc";
+        }
     }
 
 
@@ -101,7 +127,7 @@ namespace util
             throw std::runtime_error(stream.str());
         }
 
-        if (variable_index > max_frame)
+        if (variable_index > max_var)
         {
             std::stringstream stream;
             stream << "encode_variable_reference: variable index " << variable_index << " exceeds maximum value " << max_var;
@@ -166,7 +192,7 @@ namespace handlers
     dap::InitializeResponse initialize_handler(const dap::InitializeRequest&)
     {
         dap::InitializeResponse response;
-        // Return default capabilities.
+        response.supportsDelayedStackTraceLoading = true;
         return response;
     }
 
@@ -243,6 +269,7 @@ namespace handlers
     // Handle a stack trace request.
     dap::ResponseOrError<dap::StackTraceResponse> stack_trace_handler(const dap::StackTraceRequest& request)
     {
+        log_timer("stack trace start");
         if (request.threadId != unreal_thread_id)
         {
             int id = request.threadId;
@@ -257,7 +284,7 @@ namespace handlers
         int previous_frame = debugger.get_current_frame_index();
         bool disabled_watch_info = false;
 
-        for (int frame_index = 0; frame_index < debugger.get_callstack().size(); frame_index++)
+        for (int frame_index = *request.startFrame; frame_index < debugger.get_callstack().size(); frame_index++)
         {
             dap::StackFrame dap_frame;
             Debugger::StackFrame& debugger_frame = debugger.get_callstack()[frame_index];
@@ -295,6 +322,11 @@ namespace handlers
             dap_frame.name = debugger_frame.function_name;
             response.stackFrames.push_back(dap_frame);
             ++count;
+
+            if (count >= *request.levels)
+            {
+                break;
+            }
         }
 
         // Restore the frame index to our original value.
@@ -306,32 +338,65 @@ namespace handlers
             client::commands::toggle_watch_info(true);
         }
 
+        response.totalFrames = debugger.get_callstack().size();
+        log_timer("stack trace end");
+
         return response;
     }
 
     // Handle a request for scope information
     dap::ResponseOrError<dap::ScopesResponse> scopes_handler(const dap::ScopesRequest& request)
     {
+
+        log_timer("scopes start");
+
         dap::Scope scope;
         scope.name = "Locals";
         scope.presentationHint = "locals";
+        scope.expensive = true;
         scope.variablesReference = util::encode_variable_reference(request.frameId, 0, Debugger::WatchKind::Local);
+        if (debugger.get_callstack()[request.frameId].fetched_watches)
+        {
+            scope.namedVariables = debugger.get_callstack()[request.frameId].local_watches[0].children.size();
+        }
         dap::ScopesResponse response;
         response.scopes.push_back(scope);
 
         scope.name = "Globals";
         scope.presentationHint = {};
         scope.variablesReference = util::encode_variable_reference(request.frameId, 0, Debugger::WatchKind::Global);
+        scope.expensive = true;
+        if (debugger.get_callstack()[request.frameId].fetched_watches)
+        {
+            scope.namedVariables = debugger.get_callstack()[request.frameId].global_watches[0].children.size();
+        }
         response.scopes.push_back(scope);
+        log_timer("scopes end");
         return response;
     }
 
     dap::ResponseOrError<dap::VariablesResponse> variables_handler(const dap::VariablesRequest& request)
     {
+        log_timer("variables start");
         auto [frame_index, variable_index, watch_kind] = util::decode_variable_reference(request.variablesReference);
 
-        // TODO Test if the frame has received variables yet, and stall til they are received if not.
-        const Debugger::WatchList& watch_list = debugger.get_current_stack_frame().get_watches(watch_kind);
+        // If we don't have watch info for this frame yet we need to collect it now.
+        if (!debugger.get_callstack()[frame_index].fetched_watches)
+        {
+            int saved_frame_index = debugger.get_current_frame_index();
+            debugger.set_current_frame_index(frame_index);
+            debugger.set_state(Debugger::State::waiting_for_frame_watches);
+
+            // Request a stack change and wait for the watches to to be received.
+            client::commands::change_stack(frame_index);
+            signals::watches_received.wait();
+            signals::watches_received.reset();
+            debugger.set_state(Debugger::State::normal);
+            debugger.set_current_frame_index(saved_frame_index);
+            debugger.get_callstack()[frame_index].fetched_watches = true;
+        }
+
+        const Debugger::WatchList& watch_list = debugger.get_callstack()[frame_index].get_watches(watch_kind);
 
         if (request.start.value(0) != 0 || request.count.value(0) != 0)
         {
@@ -341,31 +406,40 @@ namespace handlers
 
         dap::VariablesResponse response;
 
-        const Debugger::WatchData& parent = watch_list[variable_index];
-
-        for (int child_index : parent.children)
+        // The watch list can be empty, e.g. local watches for a function with no parameters and no local variables.
+        if (!watch_list.empty())
         {
-            const Debugger::WatchData& watch = watch_list[child_index];
-            dap::Variable var;
-            var.name = watch.name;
-            var.type = watch.type;
-            var.value = watch.value;
+            const Debugger::WatchData& parent = watch_list[variable_index];
 
-            // If this variable has no children then we report its variable reference as 0. Otherwise
-            // we report this variable's index and the client will send a new variable request with this
-            // reference to fetch its children.
-            if (watch.children.empty())
+            for (int child_index : parent.children)
             {
-                var.variablesReference = 0;
+                const Debugger::WatchData& watch = watch_list[child_index];
+                dap::Variable var;
+                var.name = watch.name;
+                var.type = watch.type;
+                var.value = watch.value;
+
+                // If this variable has no children then we report its variable reference as 0. Otherwise
+                // we report this variable's index and the client will send a new variable request with this
+                // reference to fetch its children.
+                if (watch.children.empty())
+                {
+                    var.variablesReference = 0;
+                    var.namedVariables = 0;
+                    var.indexedVariables = 0;
+                }
+                else
+                {
+                    int child_reference = util::encode_variable_reference(frame_index, child_index, watch_kind);
+                    var.variablesReference = watch.children.empty() ? 0 : child_reference;
+                    var.namedVariables = watch.children.size();
+                    var.indexedVariables = 0;
+                }
+                response.variables.push_back(var);
             }
-            else
-            {
-                int child_reference = util::encode_variable_reference(frame_index, child_index, watch_kind);
-                var.variablesReference = watch.children.empty() ? 0 : child_reference;
-            }
-            response.variables.push_back(var);
         }
 
+        log_timer("variables end");
         return response;
     }
 
@@ -389,10 +463,13 @@ namespace handlers
 
     dap::NextResponse next_handler(const dap::NextRequest& request)
     {
+
+        log_timer("next start");
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.
         debugger.set_current_frame_index(0);
         client::commands::step_over();
+        log_timer("next end");
         return {};
     }
 
@@ -426,10 +503,12 @@ namespace sent_handlers
 // Tell the debug client that the debugger is stopped at a breakpoint.
 void breakpoint_hit()
 {
+    log_timer("breakpoint start");
     dap::StoppedEvent ev;
     ev.reason = "breakpoint";
     ev.threadId = unreal_thread_id;
     session->send(ev);
+    log_timer("breakpoint end");
 }
 
 // Tell the debug client that the debugger has produced some log output.
@@ -452,9 +531,8 @@ void debugger_terminated()
 
 void create_adapter()
 {
+    init_timer();
     session = dap::Session::create();
-
-
 
     // The adapter will communicate over stdin/stdout with the debug client in the editor.
 
