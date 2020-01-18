@@ -94,6 +94,26 @@ namespace client
             send_command(cmd);
         }
 
+        void set_data_watch(const std::string& var_name)
+        {
+            SetDataWatch watch;
+            Command cmd;
+
+            cmd.set_kind(Command_Kind_SetDataWatch);
+            cmd.mutable_set_data_watch()->set_var_name(var_name);
+            send_command(cmd);
+        }
+
+        void add_watch(const std::string& var_name)
+        {
+            AddWatch watch;
+            Command cmd;
+
+            cmd.set_kind(Command_Kind_AddWatch);
+            cmd.mutable_add_watch()->set_var_name(var_name);
+            send_command(cmd);
+        }
+
         void toggle_watch_info(bool b)
         {
             ToggleWatchInfo toggle_watch_info;

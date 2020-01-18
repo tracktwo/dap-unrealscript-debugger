@@ -107,11 +107,18 @@ void Debugger::unlock_list(WatchKind kind)
 {
     --watch_lock_depth;
 
-    // If we have just unlocked the last watch list then we are done receiving watches. If the debugger
-    // is waiting for the watch list to complete, signal that it's done.
-    if (watch_lock_depth == 0 && state == State::waiting_for_frame_watches)
+    // If we have just unlocked the last watch list then we are done receiving watches. Signal
+    // that they are available if the debugger is waiting for some watch list to complete.
+    if (watch_lock_depth == 0)
     {
-        signals::watches_received.fire();
+        if (state == State::waiting_for_frame_watches)
+        {
+            signals::watches_received.fire();
+        }
+        else if (state == State::waiting_for_user_watches)
+        {
+            signals::user_watches_received.fire();
+        }
     }
 }
 
@@ -211,4 +218,20 @@ void Debugger::finalize_callstack()
     callstack.pop_back();
 
     callstack[0].fetched_watches = true;
+}
+
+int Debugger::find_user_watch(const std::string& var_name) const
+{
+    if (user_watches.empty() || user_watches[0].children.empty())
+        return -1;
+
+    for (int i = 0; i < user_watches[0].children.size(); ++i)
+    {
+        if (user_watches[user_watches[0].children[i]].name == var_name)
+        {
+            return user_watches[0].children[i];
+        }
+    }
+
+    return -1;
 }

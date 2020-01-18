@@ -34,5 +34,6 @@ namespace signals
     extern signal line_received;
     extern signal watches_received;
     extern signal breakpoint_hit;
+    extern signal user_watches_received;
 }
 

@@ -4,6 +4,7 @@
 #include <exception>
 #include <filesystem>
 #include <sstream>
+#include <optional>
 
 #include "dap/io.h"
 #include "dap/network.h"
@@ -96,8 +97,8 @@ namespace util
         }
     }
 
-
-    constexpr int variable_encoding_global_bit = 0x4000'0000;
+    constexpr int variable_encoding_user_bit = 0x4000'0000;
+    constexpr int variable_encoding_global_bit = 0x2000'0000;
     constexpr int variable_encoding_frame_shift = 20;
 
     // DAP uses 'variableReferences' to identify scopes and variables within those scopes. These are integer
@@ -107,9 +108,10 @@ namespace util
     //
     //  [bit 31] xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx  [bit 0]
     //
-    //  Bit 31: Always 0
-    //  Bit 30: 0 for locals, 1 for globals
-    //  Bits 29-20: Frame index: 10 bits = 1024 possible frames
+    //  Bit 31: always 0
+    //  Bit 30: 0 if set, this is a user watch and bit 29 is unset.
+    //  Bit 29: 0 for local watch, 1 for global watch
+    //  Bits 28-20: Frame index: 9 bits = 512 possible frames (always 0 for user watches)
     //  Bits 19-0: Variable index in watch list within frame, + 1: 20 bits, but the 0 value is not used = 1,048,575 possible variables per frame.
     //             The variable index is always offset by 1 from the true index within the debugger watch vector. This is
     //             because the value 0 is special to DAP and so we cannot use it to represent the 0th local variable of the 0th stack frame.
@@ -117,7 +119,7 @@ namespace util
     //             frame when we really only need to special case the first frame, but a million variables is a whole lot anyway.
     int encode_variable_reference(int frame_index, int variable_index, Debugger::WatchKind kind)
     {
-        constexpr int max_frame = 1 << 10;
+        constexpr int max_frame = 1 << 9;
         constexpr int max_var = (1 << 20) - 1;
 
         if (frame_index >= max_frame)
@@ -140,7 +142,7 @@ namespace util
         // Add in the frame reference
         encoding |= (frame_index << variable_encoding_frame_shift);
 
-        // Add the user/global bit
+        // Add the user/global bits
         switch (kind)
         {
         case Debugger::WatchKind::Local:
@@ -150,11 +152,22 @@ namespace util
             encoding |= variable_encoding_global_bit;
             break;
         case Debugger::WatchKind::User:
-            throw std::runtime_error("encode_variable_reference: cannot encode a user watch.");
+            encoding |= variable_encoding_user_bit;
 
         }
 
         return encoding;
+    }
+
+    Debugger::WatchKind decode_watch_kind(int variable_reference)
+    {
+        if (variable_reference & variable_encoding_user_bit)
+            return Debugger::WatchKind::User;
+
+        if (variable_reference & variable_encoding_global_bit)
+            return Debugger::WatchKind::Global;
+
+        return Debugger::WatchKind::Local;
     }
 
     std::tuple<int, int, Debugger::WatchKind> decode_variable_reference(int variable_reference)
@@ -163,9 +176,9 @@ namespace util
         // the first bit of the frame.
         constexpr int variable_mask = (1 << variable_encoding_frame_shift) - 1;
 
-        // Record and then unset the global watch flag.
-        Debugger::WatchKind kind = (variable_reference & variable_encoding_global_bit) ? Debugger::WatchKind::Global : Debugger::WatchKind::Local;
-        variable_reference &= ~variable_encoding_global_bit;
+        // Record and then unset the global or user watch flag.
+        Debugger::WatchKind kind = decode_watch_kind(variable_reference);
+        variable_reference &= ~(variable_encoding_global_bit | variable_encoding_user_bit);
 
         // Extract the variable portion.
         int variable_index = (variable_reference & variable_mask) - 1;
@@ -336,7 +349,15 @@ namespace handlers
         }
 
         // Restore the frame index to our original value.
-        debugger.set_current_frame_index(previous_frame);
+        if (previous_frame != debugger.get_current_frame_index())
+        {
+            debugger.set_current_frame_index(previous_frame);
+            client::commands::change_stack(previous_frame);
+            debugger.set_state(Debugger::State::waiting_for_frame_line);
+            signals::line_received.wait();
+            signals::line_received.reset();
+            debugger.set_state(Debugger::State::normal);
+        }
 
         // If we asked the debugger to stop sending watch info, turn it back on now
         if (disabled_watch_info)
@@ -364,7 +385,6 @@ namespace handlers
         dap::Scope scope;
         scope.name = "Locals";
         scope.presentationHint = "locals";
-        scope.expensive = true;
         scope.variablesReference = util::encode_variable_reference(request.frameId, 0, Debugger::WatchKind::Local);
         if (debugger.get_callstack()[request.frameId].fetched_watches)
         {
@@ -376,7 +396,6 @@ namespace handlers
         scope.name = "Globals";
         scope.presentationHint = {};
         scope.variablesReference = util::encode_variable_reference(request.frameId, 0, Debugger::WatchKind::Global);
-        scope.expensive = true;
         if (debugger.get_callstack()[request.frameId].fetched_watches)
         {
             scope.namedVariables = debugger.get_callstack()[request.frameId].global_watches[0].children.size();
@@ -409,11 +428,26 @@ namespace handlers
             signals::watches_received.wait();
             signals::watches_received.reset();
             debugger.set_state(Debugger::State::normal);
-            debugger.set_current_frame_index(saved_frame_index);
+
+            if (debugger.get_current_frame_index() != saved_frame_index)
+            {
+                // Reset the debugger's internal state to the original callstack.
+                // We don't need var information for this (we already have the previous
+                // frmae), so turn it off.
+                debugger.set_current_frame_index(saved_frame_index);
+                client::commands::toggle_watch_info(false);
+                debugger.set_state(Debugger::State::waiting_for_frame_line);
+                client::commands::change_stack(saved_frame_index);
+                signals::line_received.wait();
+                signals::line_received.reset();
+                client::commands::toggle_watch_info(true);
+                debugger.set_state(Debugger::State::normal);
+            }
+
             debugger.get_callstack()[frame_index].fetched_watches = true;
         }
 
-        const Debugger::WatchList& watch_list = debugger.get_callstack()[frame_index].get_watches(watch_kind);
+        const Debugger::WatchList& watch_list = watch_kind == Debugger::WatchKind::User ? debugger.get_user_watches() : debugger.get_callstack()[frame_index].get_watches(watch_kind);
 
         if (request.start.value(0) != 0 || request.count.value(0) != 0)
         {
@@ -457,6 +491,58 @@ namespace handlers
         }
 
         log_timer("variables end");
+        return response;
+    }
+
+    static dap::EvaluateResponse make_user_watch_response(int index)
+    {
+        dap::EvaluateResponse response;
+        const Debugger::WatchData& watch = debugger.get_user_watches()[index];
+        response.type = watch.type;
+        response.result = watch.value;
+        if (!watch.children.empty())
+        {
+            response.variablesReference = util::encode_variable_reference(0, index, Debugger::WatchKind::User);
+            response.namedVariables = watch.children.size();
+        }
+        return response;
+    }
+
+    dap::EvaluateResponse evaluate_handler(const dap::EvaluateRequest& request)
+    {
+
+        if (request.context && *request.context != "watch")
+        {
+            dap::EvaluateResponse response;
+            response.result = "Unsupported expression";
+            return response;
+        }
+
+        Debugger::WatchList& user_watches = debugger.get_user_watches();
+
+        // If we have existing watches try to find it in the list first. It will be a child
+            // of the root node if so, we don't need to search arbitrary children throughout the list.
+        if (int index = debugger.find_user_watch(request.expression); index >= 0)
+        {
+            return make_user_watch_response(index);
+        }
+
+        // If we've failed to find this watch then we need to request it.
+        debugger.set_state(Debugger::State::waiting_for_user_watches);
+        client::commands::add_watch(request.expression);
+        signals::user_watches_received.wait();
+        signals::user_watches_received.reset();
+        debugger.set_state(Debugger::State::normal);
+
+        // Now find the watch.
+        if (int index = debugger.find_user_watch(request.expression); index >= 0)
+        {
+            return make_user_watch_response(index);
+        }
+
+        // We have failed again -- this watch must be bad.
+        dap::EvaluateResponse response;
+        response.result = "Invalid watch";
         return response;
     }
 
@@ -611,6 +697,7 @@ void create_adapter()
     session->registerHandler(&handlers::next_handler);
     session->registerHandler(&handlers::step_in_handler);
     session->registerHandler(&handlers::step_out_handler);
+    session->registerHandler(&handlers::evaluate_handler);
     session->registerHandler(&handlers::disconnect);
 
     session->registerSentHandler(&sent_handlers::initialize_response);

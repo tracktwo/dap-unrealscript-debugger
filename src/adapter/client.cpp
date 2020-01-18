@@ -23,6 +23,7 @@ namespace signals {
     signal line_received;
     signal watches_received;
     signal breakpoint_hit;
+    signal user_watches_received;
 }
 
 std::mutex client_mutex;

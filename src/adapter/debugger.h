@@ -24,7 +24,8 @@ public:
         normal,
         busy,
         waiting_for_frame_line,
-        waiting_for_frame_watches
+        waiting_for_frame_watches,
+        waiting_for_user_watches
     };
 
     // Watch lists
@@ -75,6 +76,8 @@ public:
     void finalize_callstack();
     void set_state(State s) { state = s; }
     State get_state() const { return state; }
+    WatchList& get_user_watches() { return user_watches; }
+    int find_user_watch(const std::string& var_name) const;
 
 private:
 
