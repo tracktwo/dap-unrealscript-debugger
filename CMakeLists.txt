@@ -18,7 +18,7 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 # Dependencies
 
 set (Boost_USE_STATIC_LIBS ON)
-find_package(Boost REQUIRED)
+find_package(Boost REQUIRED COMPONENTS "program_options")
 include_directories(${Boost_include_dirs})
 
 # protobuf is also needed
@@ -82,7 +82,7 @@ set (DBGADAPTER_HDRS
 
 add_executable(DebuggerAdapter ${DBGADAPTER_SRCS} ${DBGADAPTER_HDRS})
 target_compile_options(DebuggerAdapter PRIVATE "-permissive-")
-target_link_libraries(DebuggerAdapter PRIVATE protobuf::libprotobuf cppdap)
+target_link_libraries(DebuggerAdapter PRIVATE protobuf::libprotobuf cppdap ${Boost_LIBRARIES})
 
 if (DebuggerAdapter_INSTALL)
     install(TARGETS DebuggerAdapter RUNTIME DESTINATION "${DebuggerAdapter_INSTALL_BINDIR}")

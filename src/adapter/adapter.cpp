@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <sstream>
 #include <optional>
+#include <map>
 
 #include "dap/io.h"
 #include "dap/network.h"
@@ -77,24 +78,85 @@ namespace util
         return package_name.string() + "." + class_name.string();
     }
 
-    // FIXME Remove
-    static const char* dev_root = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\XCOM 2 War of the Chosen SDK\\Development\\Src\\";
-    static const char* mod_root = "C:\\Users\\jonathan\\xcom\\roguecom\\roguecom\\Src\\";
+    // Normalize a source file path to the true path name on disk. The path that we have built by gluing a user-provided
+    // source root to the package and class name that Unreal provided may not exactly match the true file name of the file
+    // on disk due to casing differences. E.g. the source-root may not have the correct casing, and while fs::exists() ignores
+    // the case differences VS Code currently doesn't do a great job at detecting two different casings of the same file name
+    // as being the same. If the cases don't match and you have opened the file in VS Code (which uses the true file path as it
+    // appears on disk) the debugger may open another copy of this same file when a breakpoint within it is hit but the source
+    // path returned from the debugger doesn't match exactly.
+    //
+    // To help reduce this annoyance the file name is canonicalized to the true path recorded on disk before returning. This
+    // is not simple to do on Windows, we need to actually open the file to query it, and it needs to use gross Win32 APIs.
+    std::string normalize_path(const std::string& path)
+    {
+        HANDLE hnd;
+        char buf[MAX_PATH];
 
+        // Open the file to get a handle
+        hnd = CreateFile(path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hnd == INVALID_HANDLE_VALUE)
+        {
+            dap::writef(log_file, "normalize_path: Could not open file (error %d\n)", GetLastError());
+            return path;
+        }
+
+        // Get the 'final path name' from the handle. Try with a reasonable buffer first, and if that fails allocate
+        // one large enough to hold the result.
+        unsigned long sz = GetFinalPathNameByHandle(hnd, buf, MAX_PATH, 0);
+        std::string str;
+        if (sz < MAX_PATH)
+        {
+            str = buf;
+        }
+        else
+        {
+            auto large_buf = std::make_unique<char[]>(sz + 1);
+            GetFinalPathNameByHandle(hnd, large_buf.get(), sz + 1, 0);
+            str = large_buf.get();
+        }
+
+        // We're now done with the handle
+        CloseHandle(hnd);
+
+        // The returned string may be prefixed with the \\?\ long path prefix. Strip it, cause VS Code doesn't want to
+        // see it.
+        if (str.find(R"(\\?\)") == 0)
+            str = str.substr(4);
+        return str;
+    }
+
+    // Normalizing the source file paths is expensive, so keep a cache of known mappings from class names to source file names.
+    std::map<std::string, std::string> file_name_cache;
+
+    // Given a class name, return a source name by attempting to apply each of the configured source-roots in order.
     std::string class_to_source(const std::string& class_name)
     {
+        // Try to find a cached version of the file first.
+        auto  it = file_name_cache.find(class_name);
+        if (it != file_name_cache.end())
+        {
+            return it->second;
+        }
+
+        // No dice. Split the name into package and file name and search the source roots until we find a match
+        // (or don't).
         auto idx = class_name.find('.');
         std::string package = class_name.substr(0, idx);
         std::string file = class_name.substr(idx + 1);
 
-        if (package == "RogueCOM")
+        for (fs::path path : source_roots)
         {
-            return mod_root + package + "\\Classes\\" + file + ".uc";
+            path = path / package / "Classes" / (file + ".uc");
+            if (fs::exists(path))
+            {
+                std::string normalized = normalize_path(path.string());
+                file_name_cache.insert({ class_name, normalized } );
+                return normalized;
+            }
         }
-        else
-        {
-            return dev_root + package + "\\Classes\\" + file + ".uc";
-        }
+        dap::writef(log_file, "Error: Cannot find source path for %s\n", class_name.c_str());
+        return class_name;
     }
 
     constexpr int variable_encoding_user_bit = 0x4000'0000;
@@ -730,7 +792,7 @@ void on_connect(const std::shared_ptr<dap::ReaderWriter>& streams)
 void start_debug_server()
 {
     server = dap::net::Server::create();
-    server->start(9444, on_connect);
+    server->start(debug_port, on_connect);
 }
 
 void stop_debug_server()

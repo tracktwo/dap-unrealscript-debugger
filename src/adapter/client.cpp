@@ -8,11 +8,12 @@
 #include <io.h>
 #include <fcntl.h>
 #include <boost/asio.hpp>
-#include <boost/asio/ip/tcp.hpp>
+#include <boost/program_options.hpp>
 
 static const int default_port = 10077;
 
 namespace asio = boost::asio;
+namespace po = boost::program_options;
 using tcp = boost::asio::ip::tcp;
 
 boost::asio::io_context ios;
@@ -31,6 +32,10 @@ Debugger debugger;
 bool log_enabled;
 std::shared_ptr<dap::Writer> log_file;
 std::deque<SerializedCommand> send_queue;
+
+std::vector<fs::path> source_roots;
+int debug_port;
+
 
 // Schedule an async receive of the next event from the debugger interface.
 void receive_next_event()
@@ -176,18 +181,53 @@ void stop_debugger()
    ios.stop();
 }
 
+bool init_source_roots(const std::vector<std::string>& in_roots)
+{
+    for (const std::string& r : in_roots)
+    {
+        fs::path root_path{ r };
+        if (!fs::exists(root_path))
+        {
+            std::cout << "Error: source-root " << root_path << " does not exist" << std::endl;
+            return false;
+        }
+        // Insert the path exactly as the user wrote it.
+        source_roots.push_back(root_path);
+    }
+    return true;
+}
+
 int main(int argc, char *argv[])
 {
-    bool debug_mode = false;
+    po::options_description desc("Options");
+    desc.add_options()
+        ("help,h", "show usage")
+        ("debug_port,d", po::value<int>(&debug_port)->default_value(0), "listen for client connections on <port> instead of stdin/stdout")
+        ("source-root,s", po::value<std::vector<std::string>>(), "path to source root")
+        ;
 
-    if (argc > 1 && strcmp(argv[1], "debug") == 0)
+    po::variables_map vm;
+    po::store(po::parse_command_line(argc, argv, desc), vm);
+    po::notify(vm);
+
+    if (vm.count("help"))
     {
-        debug_mode = true;
+        std::cout << desc << std::endl;
+        return 0;
     }
 
-    // TODO error handling for failed connection
+    if (!vm.count("source-root"))
+    {
+        std::cout << "Error: No source roots provided." << std::endl << desc << std::endl;
+        return 1;
+    }
 
-    if (debug_mode)
+    if (!init_source_roots(vm["source-root"].as<std::vector<std::string>>()))
+    {
+        return 1;
+    }
+
+    if (debug_port > 0)
     {
         // In debug mode we are communicating to VS over a tcp port rather than over stdin/stdout.
         // Log directly to stdout.
@@ -217,8 +257,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-   // create_adapter();
-    if (debug_mode)
+    if (debug_port > 0)
     {
         start_debug_server();
     }
@@ -238,7 +277,7 @@ int main(int argc, char *argv[])
     // We return from 'run' when the debugger has asked to shut down. Shut down the
     // dap service.
 
-    if (debug_mode)
+    if (debug_port > 0)
     {
         stop_debug_server();
     }

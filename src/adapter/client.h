@@ -1,15 +1,23 @@
 
 #include <memory>
 #include <deque>
+#include <filesystem>
 #include <boost/asio/io_context.hpp>
 #include "dap/io.h"
 #include "commands.pb.h"
 #include "events.pb.h"
 
+namespace fs = std::filesystem;
+
 // Logging
 
 extern bool log_enabled;
 extern std::shared_ptr<dap::Writer> log_file;
+
+// Options
+
+extern std::vector<fs::path> source_roots;
+extern int debug_port;
 
 // Message passing from the debugger adapter to the debugger interface.
 
