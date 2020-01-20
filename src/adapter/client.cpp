@@ -5,6 +5,7 @@
 #include "adapter.h"
 #include "signals.h"
 
+#include <iostream>
 #include <io.h>
 #include <fcntl.h>
 #include <boost/asio.hpp>
@@ -14,11 +15,12 @@ static const int default_port = 10077;
 
 namespace asio = boost::asio;
 namespace po = boost::program_options;
+namespace serialization = unreal_debugger::serialization;
 using tcp = boost::asio::ip::tcp;
 
 boost::asio::io_context ios;
 std::unique_ptr<tcp::socket> sock;
-SerializedCommand next_event;
+serialization::message next_event;
 
 namespace signals {
     signal line_received;
@@ -31,7 +33,7 @@ std::mutex client_mutex;
 Debugger debugger;
 bool log_enabled;
 std::shared_ptr<dap::Writer> log_file;
-std::deque<SerializedCommand> send_queue;
+std::deque<serialization::message> send_queue;
 
 std::vector<fs::path> source_roots;
 int debug_port;
@@ -43,7 +45,7 @@ void receive_next_event()
     {
         std::lock_guard<std::mutex> lock{ client_mutex };
 
-        boost::asio::async_read(*sock, boost::asio::buffer(&next_event.len, 4), [](const boost::system::error_code& ec, std::size_t len) {
+        boost::asio::async_read(*sock, boost::asio::buffer(&next_event.len_, 4), [](const boost::system::error_code& ec, std::size_t len) {
 
             {
                 // Reaquire the lock before dispatching any events.
@@ -64,9 +66,9 @@ void receive_next_event()
                 }
 
                 // TODO Reuse existing buffer if it's big enough.
-                next_event.bytes = std::make_unique<char[]>(next_event.len);
+                next_event.buf_ = std::make_unique<char[]>(next_event.len_);
 
-                boost::asio::async_read(*sock, boost::asio::buffer(next_event.bytes.get(), next_event.len), [](const boost::system::error_code& ec, std::size_t len) {
+                boost::asio::async_read(*sock, boost::asio::buffer(next_event.buf_.get(), next_event.len_), [](const boost::system::error_code& ec, std::size_t len) {
                     if (ec)
                     {
                         dap::writef(log_file, "receiving event body error: %s", ec.message().c_str());
@@ -74,22 +76,16 @@ void receive_next_event()
                         return;
                     }
 
-                    if (len != next_event.len)
+                    if (len != next_event.len_)
                     {
-                        dap::writef(log_file, "failed to read next message body: received %z of %z bytes\n", len, next_event.len);
+                        dap::writef(log_file, "failed to read next message body: received %z of %z bytes\n", len, next_event.len_);
                         debugger_terminated();
                         return;
                     }
-                    unreal_debugger::events::Event ev;
-                    if (ev.ParseFromArray(next_event.bytes.get(), len))
-                    {
-                        dispatch_event(ev);
-                    }
-                    else
-                    {
-                        dap::writef(log_file, "failed to parse event.");
-                    }
 
+                    dispatch_event(next_event);
+                    next_event.buf_.reset();
+                    next_event.len_ = 0;
                     receive_next_event();
                 });
             }
@@ -105,7 +101,7 @@ void send_next_message()
     auto&& next_msg = send_queue.front();
 
     // Begin the async send of the front-most message
-    async_write(*sock, asio::buffer(&next_msg.len, 4), [](const boost::system::error_code& ec, std::size_t n) {
+    async_write(*sock, asio::buffer(&next_msg.len_, 4), [](const boost::system::error_code& ec, std::size_t n) {
         if (ec)
         {
             dap::writef(log_file, "sending command header received error: %s", ec.message().c_str());
@@ -118,7 +114,7 @@ void send_next_message()
 
         // Now send the message body
         auto&& next_msg = send_queue.front();
-        async_write(*sock, asio::buffer(next_msg.bytes.get(), next_msg.len), [len = next_msg.len](const boost::system::error_code& ec, std::size_t n) {
+        async_write(*sock, asio::buffer(next_msg.buf_.get(), next_msg.len_), [len = next_msg.len_](const boost::system::error_code& ec, std::size_t n) {
             bool is_empty = false;
 
             {
@@ -151,7 +147,7 @@ void send_next_message()
 }
 
 // Enqueue the given command to send to the debugger interface.
-void send_command(const unreal_debugger::commands::Command& cmd)
+void send_command(const commands::command& cmd)
 {
     bool is_empty = false;
 
@@ -159,12 +155,10 @@ void send_command(const unreal_debugger::commands::Command& cmd)
         std::lock_guard<std::mutex> lock(client_mutex);
 
       //  dap::writef(log_file, "Sending command %s\n", cmd.Kind_Name(cmd.kind()).c_str());
-        std::size_t len = cmd.ByteSizeLong();
-        std::unique_ptr<char[]> buf = std::make_unique<char[]>(len);
-        cmd.SerializeToArray(buf.get(), len);
+        unreal_debugger::serialization::message msg = cmd.serialize();
 
         is_empty = send_queue.empty();
-        send_queue.emplace_back(std::move(buf), len);
+        send_queue.push_back(std::move(msg));
     }
 
     // If the queue was empty before we added this message, begin the async send.
@@ -181,29 +175,12 @@ void stop_debugger()
    ios.stop();
 }
 
-bool init_source_roots(const std::vector<std::string>& in_roots)
-{
-    for (const std::string& r : in_roots)
-    {
-        fs::path root_path{ r };
-        if (!fs::exists(root_path))
-        {
-            std::cout << "Error: source-root " << root_path << " does not exist" << std::endl;
-            return false;
-        }
-        // Insert the path exactly as the user wrote it.
-        source_roots.push_back(root_path);
-    }
-    return true;
-}
-
 int main(int argc, char *argv[])
 {
     po::options_description desc("Options");
     desc.add_options()
         ("help,h", "show usage")
         ("debug_port,d", po::value<int>(&debug_port)->default_value(0), "listen for client connections on <port> instead of stdin/stdout")
-        ("source-root,s", po::value<std::vector<std::string>>(), "path to source root")
         ;
 
     po::variables_map vm;
@@ -214,17 +191,6 @@ int main(int argc, char *argv[])
     {
         std::cout << desc << std::endl;
         return 0;
-    }
-
-    if (!vm.count("source-root"))
-    {
-        std::cout << "Error: No source roots provided." << std::endl << desc << std::endl;
-        return 1;
-    }
-
-    if (!init_source_roots(vm["source-root"].as<std::vector<std::string>>()))
-    {
-        return 1;
     }
 
     if (debug_port > 0)

@@ -250,6 +250,50 @@ namespace util
 
         return { frame_index, variable_index, kind };
     }
+
+    // Initialize the list of source roots provided as launch arguments. Returns a list of bad roots (if any).
+    std::vector<std::string> init_source_roots(const std::vector<std::string>& in_roots)
+    {
+        std::vector<std::string> bad_roots;
+
+        for (const std::string& r : in_roots)
+        {
+            fs::path root_path{ r };
+            if (!fs::exists(root_path))
+            {
+                bad_roots.push_back(r);
+            }
+            // Insert the path exactly as the user wrote it.
+            source_roots.push_back(root_path);
+        }
+
+        return bad_roots;
+    }
+}
+
+// Define a custom "launch" request type so we can receive specific launch parameters from
+// vscode.
+namespace dap
+{
+    struct UnrealLaunchRequest : LaunchRequest
+    {
+        using Response = LaunchResponse;
+
+        UnrealLaunchRequest() = default;
+        ~UnrealLaunchRequest() = default;
+
+        // A vector of strings for the list of source roots.
+        optional<array<string>> sourceRoots;
+    };
+
+
+    DAP_DECLARE_STRUCT_TYPEINFO(UnrealLaunchRequest);
+
+    DAP_IMPLEMENT_STRUCT_TYPEINFO(UnrealLaunchRequest,
+        "launch",
+        DAP_FIELD(restart, "__restart"),
+        DAP_FIELD(noDebug, "noDebug"),
+        DAP_FIELD(sourceRoots, "sourceRoots"));
 }
 
 namespace handlers
@@ -273,9 +317,26 @@ namespace handlers
 
     // Handle a 'launch' request. There isn't really anything to do here
     // since the debugger can't actually 'launch' anything.
-    dap::LaunchResponse launch_handler(const dap::LaunchRequest& req)
+    dap::ResponseOrError<dap::LaunchResponse> launch_handler(const dap::UnrealLaunchRequest& req)
     {
-        return {};
+        if (req.sourceRoots)
+        {
+            auto bad_roots = util::init_source_roots(*req.sourceRoots);
+            if (!bad_roots.empty())
+            {
+                std::stringstream msg;
+                msg << "Error: Bad source roots:" << std::endl;
+                for (const auto& r : bad_roots)
+                {
+                    msg << r << std::endl;
+                }
+
+                dap::Error err;
+                err.message = msg.str();
+                return err;
+            }
+        }
+        return dap::LaunchResponse{};
     }
 
     // Handle an 'attach' request. This should be implemented.

@@ -13,28 +13,32 @@ set(DebuggerAdapter_INSTALL_BINDIR "" CACHE STRING "Installation directory for t
 set (CMAKE_CXX_STANDARD 17)
 string(REGEX REPLACE " /W[0-4]" "" CMAKE_C_FLAGS ${CMAKE_C_FLAGS})
 string(REGEX REPLACE " /W[0-4]" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+
+# TODO Interface could use DLL version
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 # Dependencies
 
 set (Boost_USE_STATIC_LIBS ON)
 find_package(Boost REQUIRED COMPONENTS "program_options")
-include_directories(${Boost_include_dirs})
-
-# protobuf is also needed
-set (Protobuf_USE_STATIC_LIBS ON)
-find_package(Protobuf REQUIRED)
-include_directories(${Protobuf_INCLUDE_DIRS})
+include_directories(${Boost_INCLUDE_DIR})
 
 # Third party utilities included in build
 set (cppdap_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cppdap")
 add_subdirectory(${cppdap_DIR})
 
-# Unreal Debugger Interface RPC definition
-protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS src/protos/commands.proto src/protos/events.proto)
+include_directories("${cppdap_DIR}/include")
 
-include_directories("${CMAKE_CURRENT_BINARY_DIR}" "${cppdap_DIR}/include")
+# Common files
+set (DBGCOMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/common")
 
+set (DBGCOMMON_HDRS
+    ${DBGCOMMON_DIR}/commands.h
+    ${DBGCOMMON_DIR}/events.h
+    ${DBGCOMMON_DIR}/message.h
+)
+
+include_directories(${DBGCOMMON_DIR})
 
 # The debugger interface project
 set (DBGIFACE_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/interface")
@@ -44,17 +48,15 @@ set (DBGIFACE_SRCS
     ${DBGIFACE_SRC_DIR}/debuggerinterface.cpp
     ${DBGIFACE_SRC_DIR}/events.cpp
     ${DBGIFACE_SRC_DIR}/service.cpp
-    ${PROTO_SRCS}
 )
 
 set (DBGIFACE_HDRS
     ${DBGIFACE_SRC_DIR}/service.h
-    ${PROTO_HDRS}
+    ${DBGCOMMON_HDRS}
 )
 
 add_library(DebuggerInterface SHARED ${DBGIFACE_SRCS} ${DBGIFACE_HDRS})
 target_compile_options(DebuggerInterface PRIVATE "-permissive-")
-target_link_libraries(DebuggerInterface PRIVATE protobuf::libprotobuf)
 target_link_options(DebuggerInterface PRIVATE "/MAP")
 
 if (DebuggerInterface_INSTALL)
@@ -70,19 +72,19 @@ set (DBGADAPTER_SRCS
     ${DBGADAPTER_SRC_DIR}/commands.cpp
     ${DBGADAPTER_SRC_DIR}/debugger.cpp
     ${DBGADAPTER_SRC_DIR}/events.cpp
-    ${PROTO_SRCS}
 )
 
 set (DBGADAPTER_HDRS
     ${DBGADAPTER_SRC_DIR}/adapter.h
     ${DBGADAPTER_SRC_DIR}/client.h
     ${DBGADAPTER_SRC_DIR}/debugger.h
-    ${PROTO_HDRS}
+    ${DBGCOMMON_HDRS}
 )
 
 add_executable(DebuggerAdapter ${DBGADAPTER_SRCS} ${DBGADAPTER_HDRS})
 target_compile_options(DebuggerAdapter PRIVATE "-permissive-")
-target_link_libraries(DebuggerAdapter PRIVATE protobuf::libprotobuf cppdap ${Boost_LIBRARIES})
+target_link_libraries(DebuggerAdapter PRIVATE cppdap ${Boost_LIBRARIES})
+target_link_options(DebuggerAdapter PRIVATE "/MAP")
 
 if (DebuggerAdapter_INSTALL)
     install(TARGETS DebuggerAdapter RUNTIME DESTINATION "${DebuggerAdapter_INSTALL_BINDIR}")

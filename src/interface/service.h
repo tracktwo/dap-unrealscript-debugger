@@ -9,8 +9,12 @@
 #include <atomic>
 #include <optional>
 
-#include "events.pb.h"
-#include "commands.pb.h"
+#include "events.h"
+#include "commands.h"
+
+namespace serialization = unreal_debugger::serialization;
+namespace commands = unreal_debugger::serialization::commands;
+namespace events = unreal_debugger::serialization::events;
 
 void start_debugger_service();
 bool check_service();
@@ -73,28 +77,28 @@ public:
     // to unreal through the callback pointer provided by Unreal as simple strings.
     /////////////////
 
-    void add_breakpoint(const unreal_debugger::commands::AddBreakpoint& cmd);
-    void remove_breakpoint(const unreal_debugger::commands::RemoveBreakpoint& cmd);
-    void add_watch(const unreal_debugger::commands::AddWatch& cmd);
-    void remove_watch(const unreal_debugger::commands::RemoveWatch& cmd);
-    void clear_watch(const unreal_debugger::commands::ClearWatch& cmd);
-    void change_stack(const unreal_debugger::commands::ChangeStack& cmd);
-    void set_data_watch(const unreal_debugger::commands::SetDataWatch& cmd);
-    void break_on_none(const unreal_debugger::commands::BreakOnNone& cmd);
-    void break_cmd(const unreal_debugger::commands::Break& cmd);
-    void stop_debugging(const unreal_debugger::commands::StopDebugging& cmd);
-    void go(const unreal_debugger::commands::Go& cmd);
-    void step_into(const unreal_debugger::commands::StepInto& cmd);
-    void step_over(const unreal_debugger::commands::StepOver& cmd);
-    void step_out_of(const unreal_debugger::commands::StepOutOf& cmd);
-    void toggle_watch_info(const unreal_debugger::commands::ToggleWatchInfo& cmd);
+    void dispatch_command(const serialization::message& msg);
+    void add_breakpoint(const commands::add_breakpoint& cmd);
+    void remove_breakpoint(const commands::remove_breakpoint& cmd);
+    void add_watch(const commands::add_watch& cmd);
+    void remove_watch(const commands::remove_watch& cmd);
+    void clear_watch(const commands::clear_watch& cmd);
+    void change_stack(const commands::change_stack& cmd);
+    void set_data_watch(const commands::set_data_watch& cmd);
+    void break_on_none(const commands::break_on_none& cmd);
+    void break_cmd(const commands::break_cmd& cmd);
+    void stop_debugging(const commands::stop_debugging& cmd);
+    void go(const commands::go& cmd);
+    void step_into(const commands::step_into& cmd);
+    void step_over(const commands::step_over& cmd);
+    void step_out_of(const commands::step_out_of& cmd);
+    void toggle_watch_info(const commands::toggle_watch_info& cmd);
 
 private:
 
     using Lock = std::lock_guard<std::mutex>;
 
-    void send_event(const unreal_debugger::events::Event& msg);
-    void dispatch_command(const unreal_debugger::commands::Command& cmd);
+    void send_event(const events::event& ev);
     void send_next_message();
     void receive_next_message();
     void accept_connection();
@@ -105,24 +109,10 @@ private:
    // watch kinds unreal implements. These values are used by clear_a_watch
     // and add_a_watch.
     int watch_indices_[3];
-    std::optional<unreal_debugger::events::UnlockList> pending_unlocks_[3];
-
-    struct SerializedMessage
-    {
-        SerializedMessage(std::unique_ptr<char[]> b, size_t l)
-            : bytes(std::move(b)), len(l)
-        {}
-
-        SerializedMessage()
-            : bytes{}, len{ 0 }
-        {}
-
-        std::unique_ptr<char[]> bytes;
-        size_t len;
-    };
+    std::optional<events::unlock_list> pending_unlocks_[3];
 
     // A queue of serialized messages waiting to be sent.
-    std::deque<SerializedMessage> send_queue_;
+    std::deque<serialization::message> send_queue_;
 
     // Synchronization between the worker thread (reading debugger commands) and
     // the calls from Unreal (writing debugger events).
@@ -134,12 +124,11 @@ private:
 
     std::unique_ptr<tcp::socket> socket_;
 
-    SerializedMessage next_message_;
+    serialization::message next_message_;
 
     bool connected_ = false;
 
     bool building_call_stack_ = false;
-    int call_stack_size_ = 0;
     std::string current_stack_frame_name_;
     int current_stack_frame_line_;
     bool send_watch_info_ = true;

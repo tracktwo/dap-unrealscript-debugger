@@ -1,38 +1,26 @@
 
 #include "service.h"
 
-using namespace unreal_debugger::events;
+using namespace unreal_debugger::serialization::events;
 
 void DebuggerService::show_dll_form()
 {
-    Event ev;
-    ev.set_kind(Event_Kind_ShowDllForm);
-    ev.mutable_show_dll_form();
-    send_event(ev);
+    send_event(events::show_dll_form{});
 }
 
 void DebuggerService::build_hierarchy()
 {
-    Event ev;
-    ev.set_kind(Event_Kind_BuildHierarchy);
-    ev.mutable_build_hierarchy();
-    send_event(ev);
+    send_event(events::build_hierarchy{});
 }
 
 void DebuggerService::clear_hierarchy()
 {
-    Event ev;
-    ev.set_kind(Event_Kind_ClearHierarchy);
-    ev.mutable_clear_hierarchy();
-    send_event(ev);
+    send_event(events::clear_hierarchy{});
 }
 
 void DebuggerService::add_class_to_hierarchy(const char* class_name)
 {
-    Event ev;
-    ev.set_kind(Event_Kind_AddClassToHierarchy);
-    ev.mutable_add_class_to_hierarchy()->set_class_name(class_name);
-    send_event(ev);
+    send_event(events::add_class_to_hierarchy{ class_name });
 }
 
 void DebuggerService::clear_a_watch(int watch_kind)
@@ -46,13 +34,10 @@ void DebuggerService::clear_a_watch(int watch_kind)
 
     if (pending_unlocks_[watch_kind])
     {
-        pending_unlocks_[watch_kind]->clear_watch_info();
+        pending_unlocks_[watch_kind]->watch_info_.clear();
     }
 
-    Event ev;
-    ev.set_kind(Event_Kind_ClearAWatch);
-    ev.mutable_clear_a_watch()->set_watch_type(watch_kind);
-    send_event(ev);
+    send_event(events::clear_a_watch{ watch_kind });
 }
 
 // AddAWatch is special : it's the only entry point from unreal that accepts a return value.
@@ -84,13 +69,7 @@ int DebuggerService::add_a_watch(int watch_kind, int parent, const char* name, c
 
     assert(pending_unlocks_[watch_kind]);
 
-    AddAWatch *new_watch = pending_unlocks_[watch_kind]->add_watch_info();
-    new_watch->set_watch_type(watch_kind);
-    new_watch->set_parent_index(parent);
-    new_watch->set_name(name);
-    new_watch->set_value(value);
-    new_watch->set_assigned_index(idx);
-
+    pending_unlocks_[watch_kind]->watch_info_.emplace_back(parent, idx, name, value);
     return idx;
 }
 
@@ -102,14 +81,9 @@ void DebuggerService::lock_list(int watch_kind)
     // Create a pending unlock_list message. All watches we receive will be queued up into
     // this message to be sent when we unlock.
     assert(!pending_unlocks_[watch_kind]);
-    unreal_debugger::events::UnlockList unlock;
-    unlock.set_watch_type(watch_kind);
-    pending_unlocks_[watch_kind] = std::move(unlock);
+    pending_unlocks_[watch_kind].emplace(watch_kind);
 
-    Event ev;
-    ev.set_kind(Event_Kind_LockList);
-    ev.mutable_lock_list()->set_watch_type(watch_kind);
-    send_event(ev);
+    send_event(events::lock_list{ watch_kind });
 }
 
 void DebuggerService::unlock_list(int watch_kind)
@@ -119,82 +93,47 @@ void DebuggerService::unlock_list(int watch_kind)
 
     assert(pending_unlocks_[watch_kind]);
 
-    Event ev;
-    ev.set_kind(Event_Kind_UnlockList);
-    *ev.mutable_unlock_list() = *pending_unlocks_[watch_kind];
-    pending_unlocks_[watch_kind] = {};
-    send_event(ev);
+    events::unlock_list unlock = std::move(*pending_unlocks_[watch_kind]);
+    pending_unlocks_[watch_kind].reset();
+    send_event(unlock);
 }
 
 void DebuggerService::add_breakpoint(const char* class_name, int line_number)
 {
-    Event ev;
-    ev.set_kind(Event_Kind_AddBreakpoint);
-    AddBreakpoint* payload = ev.mutable_add_breakpoint();
-    payload->set_class_name(class_name);
-    payload->set_line_number(line_number);
-    send_event(ev);
+    send_event(events::add_breakpoint{ class_name, line_number });
 }
 
 void DebuggerService::remove_breakpoint(const char* class_name, int line_number)
 {
-    Event ev;
-    ev.set_kind(Event_Kind_RemoveBreakpoint);
-    RemoveBreakpoint* payload = ev.mutable_remove_breakpoint();
-    payload->set_class_name(class_name);
-    payload->set_line_number(line_number);
-    send_event(ev);
+    send_event(events::remove_breakpoint{ class_name, line_number });
 }
 
 void DebuggerService::editor_load_class(const char* class_name)
 {
-    Event ev;
-    ev.set_kind(Event_Kind_EditorLoadClass);
-    ev.mutable_editor_load_class()->set_class_name(class_name);
-    send_event(ev);
+    send_event(events::editor_load_class{ class_name });
 }
 
 void DebuggerService::editor_goto_line(int line_number, int highlight)
 {
-    Event ev;
-    ev.set_kind(Event_Kind_EditorGotoLine);
-    EditorGotoLine* payload = ev.mutable_editor_goto_line();
-    payload->set_line_number(line_number);
-    payload->set_highlight(highlight);
-    send_event(ev);
+    send_event(events::editor_goto_line{ line_number, static_cast<bool>(highlight) });
 }
 
 void DebuggerService::add_line_to_log(const char* text)
 {
-    Event ev;
-    ev.set_kind(Event_Kind_AddLineToLog);
-    ev.mutable_add_line_to_log()->set_text(text);
-    send_event(ev);
+    send_event(events::add_line_to_log{ text });
 }
 
 void DebuggerService::call_stack_clear()
 {
-    // Reset the tracking for our call stack size.
-    call_stack_size_ = 0;
-    Event ev;
-    ev.set_kind(Event_Kind_CallStackClear);
-    ev.mutable_call_stack_clear();
-    send_event(ev);
+    send_event(events::call_stack_clear{});
 }
 
 void DebuggerService::call_stack_add(const char* entry)
 {
-    // Before we can send this event we need to ask unreal to switch the frame so we can get the line number.
-    Event ev;
-    ev.set_kind(Event_Kind_CallStackAdd);
-    ev.mutable_call_stack_add()->set_entry(entry);
-    send_event(ev);
+    send_event(events::call_stack_add{ entry });
 }
 
 void DebuggerService::set_current_object_name(const char* object_name)
 {
-    Event ev;
-    ev.set_kind(Event_Kind_SetCurrentObjectName);
-    ev.mutable_set_current_object_name()->set_object_name(object_name);
-    send_event(ev);
+    send_event(events::set_current_object_name{ object_name });
 }

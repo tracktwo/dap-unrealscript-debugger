@@ -46,13 +46,8 @@ void DebuggerService::stop()
 // a debugger shutdown (via a toggledebugger console command).
 void DebuggerService::shutdown()
 {
-    using namespace unreal_debugger::events;
-
-    Event ev;
-    ev.set_kind(Event_Kind_Terminated);
-    ev.mutable_terminated();
     // Send a 'terminated' event to the debugger client so it knows unreal has stopped the debugger.
-    send_event(ev);
+    send_event(events::terminated{});
     state = service_state::shutdown;
 }
 
@@ -60,7 +55,7 @@ void DebuggerService::receive_next_message()
 {
     {
         Lock lock{mu_};
-        async_read(*socket_, boost::asio::buffer(&next_message_.len, 4), [this](const boost::system::error_code& ec, std::size_t len) {
+        async_read(*socket_, boost::asio::buffer(&next_message_.len_, 4), [this](const boost::system::error_code& ec, std::size_t len) {
             if (ec)
             {
                 printf("UnrealDebugger: Receiving command header error: %s\n", ec.message().c_str());
@@ -74,31 +69,24 @@ void DebuggerService::receive_next_message()
                 return;
             }
 
-            next_message_.bytes = std::make_unique<char[]>(next_message_.len);
-            async_read(*socket_, boost::asio::buffer(next_message_.bytes.get(), next_message_.len), [this](const boost::system::error_code& ec, std::size_t len) {
-                unreal_debugger::commands::Command cmd;
-
+            next_message_.buf_ = std::make_unique<char[]>(next_message_.len_);
+            async_read(*socket_, boost::asio::buffer(next_message_.buf_.get(), next_message_.len_), [this](const boost::system::error_code& ec, std::size_t len) {
                 if (ec)
                 {
                     printf("UnrealDebugger: Receiving command body error: %s\n", ec.message().c_str());
                     stop();
                     return;
                 }
-                if (len != next_message_.len)
+                if (len != next_message_.len_)
                 {
-                    printf("UnrealDebugger: failed to read body: read %z of %z bytes\n", len, next_message_.len);
+                    printf("UnrealDebugger: failed to read body: read %z of %z bytes\n", len, next_message_.len_);
                     stop();
                     return;
                 }
 
-                if (cmd.ParseFromArray(next_message_.bytes.get(), next_message_.len))
-                {
-                    dispatch_command(cmd);
-                }
-                else
-                {
-                    printf("UnrealDebugger: Failed to parse command.");
-                }
+                dispatch_command(next_message_);
+                next_message_.buf_ = {};
+                next_message_.len_ = 0;
                 receive_next_message();
             });
         });
@@ -117,7 +105,7 @@ void DebuggerService::accept_connection()
 
 // Enqueues a message to send to the debugger client. If the queue is
 // currently empty it will also initiate an async send of the message.
-void DebuggerService::send_event(const unreal_debugger::events::Event& msg)
+void DebuggerService::send_event(const events::event& ev)
 {
     bool is_empty = false;
 
@@ -128,16 +116,9 @@ void DebuggerService::send_event(const unreal_debugger::events::Event& msg)
     // Control the scoping of the lock guard while we access the send queue.
     {
         Lock lock(mu_);
-
-        printf("Sending event %s\n", unreal_debugger::events::Event::Kind_Name(msg.kind()).c_str());
-        // Serialize the message into a buffer that we can send over the wire.
-        std::size_t len = msg.ByteSizeLong();
-        std::unique_ptr<char[]> buf = std::make_unique<char[]>(len);
-        msg.SerializeToArray(buf.get(), len);
-
         is_empty = send_queue_.empty();
         // Add the message to the send queue
-        send_queue_.emplace_back(std::move(buf), len);
+        send_queue_.push_back(ev.serialize());
     }
 
     // The queue was empty prior to the message we just enqueued, so send this message now.
@@ -157,7 +138,7 @@ void DebuggerService::send_next_message()
     assert(!send_queue_.empty());
     auto&& next_msg = send_queue_.front();
 
-    async_write(*socket_, boost::asio::buffer(&next_msg.len, 4), [this](const boost::system::error_code& ec, std::size_t n) {
+    async_write(*socket_, boost::asio::buffer(&next_msg.len_, 4), [this](const boost::system::error_code& ec, std::size_t n) {
         if (ec)
         {
             printf("UnrealDebugger: Sending event header error: %s\n", ec.message().c_str());
@@ -173,7 +154,7 @@ void DebuggerService::send_next_message()
 
         auto&& next_msg = send_queue_.front();
 
-        async_write(*socket_, boost::asio::buffer(next_msg.bytes.get(), next_msg.len), [this, len = next_msg.len](boost::system::error_code ec, std::size_t n) {
+        async_write(*socket_, boost::asio::buffer(next_msg.buf_.get(), next_msg.len_), [this, len = next_msg.len_](boost::system::error_code ec, std::size_t n) {
             bool is_empty = false;
             {
                 Lock lock(mu_);
