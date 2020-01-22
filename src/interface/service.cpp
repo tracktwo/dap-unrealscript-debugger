@@ -26,9 +26,10 @@ void DebuggerService::start()
 
     acceptor_ = std::make_unique<tcp::acceptor>(ios, tcp::endpoint(tcp::v4(), port));
 
+    state = service_state::running;
+
     // Queue the next connection
     accept_connection();
-    state = service_state::running;
 }
 
 // Request a stop, usually because of an error.
@@ -51,46 +52,59 @@ void DebuggerService::shutdown()
     state = service_state::shutdown;
 }
 
+// Receive and process the next command message from the client. Since there is only ever a single IO thread reading
+// these messages access to the next message object does not need to be synchronized.
 void DebuggerService::receive_next_message()
 {
-    {
-        Lock lock{mu_};
-        async_read(*socket_, boost::asio::buffer(&next_message_.len_, 4), [this](const boost::system::error_code& ec, std::size_t len) {
+    // Register a handler to read the command header.
+    async_read(*socket_, boost::asio::buffer(&next_command_.len_, 4), [this](const boost::system::error_code& ec, std::size_t len) {
+
+        // TODO Better error handling.
+        if (ec)
+        {
+            printf("UnrealDebugger: Receiving command header error: %s\n", ec.message().c_str());
+            stop();
+            return;
+        }
+        if (len != 4)
+        {
+            printf("UnrealDebugger: failed to read header.");
+            stop();
+            return;
+        }
+
+        // Allocate the buffer for the command
+        // TODO: Keep any previous buffer here and re-use it if it's big enough instead of re-allocating each read.
+        next_command_.buf_ = std::make_unique<char[]>(next_command_.len_);
+
+        // Register a handler to read the command body
+        async_read(*socket_, boost::asio::buffer(next_command_.buf_.get(), next_command_.len_), [this](const boost::system::error_code& ec, std::size_t len) {
+
+            // TODO better error handling.
             if (ec)
             {
-                printf("UnrealDebugger: Receiving command header error: %s\n", ec.message().c_str());
+                printf("UnrealDebugger: Receiving command body error: %s\n", ec.message().c_str());
                 stop();
                 return;
             }
-            if (len != 4)
+            if (len != next_command_.len_)
             {
-                printf("UnrealDebugger: failed to read header.");
+                printf("UnrealDebugger: failed to read body: read %z of %z bytes\n", len, next_command_.len_);
                 stop();
                 return;
             }
 
-            next_message_.buf_ = std::make_unique<char[]>(next_message_.len_);
-            async_read(*socket_, boost::asio::buffer(next_message_.buf_.get(), next_message_.len_), [this](const boost::system::error_code& ec, std::size_t len) {
-                if (ec)
-                {
-                    printf("UnrealDebugger: Receiving command body error: %s\n", ec.message().c_str());
-                    stop();
-                    return;
-                }
-                if (len != next_message_.len_)
-                {
-                    printf("UnrealDebugger: failed to read body: read %z of %z bytes\n", len, next_message_.len_);
-                    stop();
-                    return;
-                }
+            // Dispatch the command. This must happen on the same IO thread and complete before we return so we can re-use the message space.
+            dispatch_command(next_command_);
 
-                dispatch_command(next_message_);
-                next_message_.buf_ = {};
-                next_message_.len_ = 0;
-                receive_next_message();
-            });
+            // Clear out the buffer.
+            next_command_.buf_ = {};
+            next_command_.len_ = 0;
+
+            // Start async handling for the next message.
+            receive_next_message();
         });
-    }
+    });
 }
 
 void DebuggerService::accept_connection()
@@ -113,16 +127,10 @@ void DebuggerService::send_event(const events::event& ev)
     if (!connected_)
         return;
 
-    // Control the scoping of the lock guard while we access the send queue.
-    {
-        Lock lock(mu_);
-        is_empty = send_queue_.empty();
-        // Add the message to the send queue
-        send_queue_.push_back(ev.serialize());
-    }
-
-    // The queue was empty prior to the message we just enqueued, so send this message now.
-    if (is_empty)
+    // Serialize and enqueue the next message. If the queue was empty prior to the message
+    // we just enqueued, register a handler to send this message. This actual send will not be serviced
+    // on this thread, but on the IO thread.
+    if (send_queue_.push(ev.serialize()))
     {
         send_next_message();
     }
@@ -133,12 +141,15 @@ void DebuggerService::send_event(const events::event& ev)
 // when it completes.
 void DebuggerService::send_next_message()
 {
-    Lock lock(mu_);
+    // This must be on the single IO writer thread, so nobody else can be emptying the queue
+    // while we're processing this message. We don't need to lock access to this top element while
+    // we're processing the send.
+    auto&& next_msg = send_queue_.top();
 
-    assert(!send_queue_.empty());
-    auto&& next_msg = send_queue_.front();
-
+    // Start the async send of the header for this message.
     async_write(*socket_, boost::asio::buffer(&next_msg.len_, 4), [this](const boost::system::error_code& ec, std::size_t n) {
+
+        // TODO better error handling.
         if (ec)
         {
             printf("UnrealDebugger: Sending event header error: %s\n", ec.message().c_str());
@@ -152,32 +163,32 @@ void DebuggerService::send_next_message()
             return;
         }
 
-        auto&& next_msg = send_queue_.front();
+        // Fetch the top element again so we can send the body
+        auto&& next_msg = send_queue_.top();
 
+        // Start the async send of the message body
         async_write(*socket_, boost::asio::buffer(next_msg.buf_.get(), next_msg.len_), [this, len = next_msg.len_](boost::system::error_code ec, std::size_t n) {
-            bool is_empty = false;
+            // TODO Better error handling
+            if (ec)
             {
-                Lock lock(mu_);
-
-                if (ec)
-                {
-                    printf("UnrealDebugger: Sending event body error: %s\n", ec.message().c_str());
-                    stop();
-                    return;
-                }
-                if (n != len)
-                {
-                    printf("UnrealDebugger: Sending event body truncated: wrote %z of %z bytes\n", n, len);
-                    stop();
-                    return;
-                }
-
-                send_queue_.pop_front();
-                is_empty = send_queue_.empty();
+                printf("UnrealDebugger: Sending event body error: %s\n", ec.message().c_str());
+                stop();
+                return;
+            }
+            if (n != len)
+            {
+                printf("UnrealDebugger: Sending event body truncated: wrote %z of %z bytes\n", n, len);
+                stop();
+                return;
             }
 
-            // If we have more data ready to go, send the next one.
-            if (!is_empty) {
+            // This message is now complete, pop it from the queue. If the queue is not empty after this pop, register
+            // a new send. Note that the test for emptiness is done while the internal lock is held while popping the
+            // element, so there is no race here with the producer thread: if the queue is empty we must just return.
+            // Nobody can be yet adding anything to the queue, and any thread blocked on the lock must observe the
+            // empty queue and will register the next send handler themselves.
+            if (!send_queue_.pop())
+            {
                 send_next_message();
             }
         });
@@ -202,6 +213,7 @@ void start_debugger_service()
     // Start listening for connections.
     service->start();
 
+    // run the worker thread to service i/o
     worker = std::thread(worker_loop);
 }
 

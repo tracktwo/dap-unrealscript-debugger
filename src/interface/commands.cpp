@@ -1,9 +1,22 @@
 
 #include "service.h"
 
+// Handle commands from the debugger. When a command is read from the debugger network
+// socket it is deserialized and then dispatched to unreal via the callback function.
+//
+// These commands are structured, although strictly speaking there is no real reason for
+// them to be. Unreal only accepts a string through its callback function, so we could
+// have just as easily had the debugger just send the raw strings over the network and
+// pass them off to the Unreal callback with no deserialization or re-encoding as strings.
+// This is done simply for error checking to try to ensure the commands we get make sense
+// instead of trusting a raw string sent over the network.
+
 namespace serialization = unreal_debugger::serialization;
 namespace commands = serialization::commands;
 
+// Given the message received over the wire, deserialize it into structured form and
+// call the appropriate debugger service function to re-encode it as a string for the
+// unreal callback.
 void DebuggerService::dispatch_command(const serialization::message& msg)
 {
     char* buf = msg.buf_.get();
@@ -116,9 +129,20 @@ void DebuggerService::step_out_of(const commands::step_out_of& cmd)
     callback_function("stepoutof");
 }
 
+// toggle_watch_info is not a real unreal command. This pseudo command is used
+// by the debugger to tell the interface service that it does not want to receive
+// any watch updates. This is typically used to save network traffic when the debugger
+// needs to change stacks to retreive line information. Unreal does not send line
+// info in the string for a stack frame entry (although the docs claim it does),
+// so the only way to get this for other stack frames is to switch frames and wait for
+// the EditorGotoLine() call. But switching frames will also send all watch information
+// for the new frame, and this is very expensive.
 void DebuggerService::toggle_watch_info(const commands::toggle_watch_info& cmd)
 {
     send_watch_info_ = cmd.send_watch_info_;
+
+    // The debugger has requested no watch info. Clear out anything that may be
+    // pending in the unlock list.
     if (!send_watch_info_)
     {
         pending_unlocks_[0].reset();

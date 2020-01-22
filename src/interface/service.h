@@ -16,7 +16,15 @@ namespace serialization = unreal_debugger::serialization;
 namespace commands = unreal_debugger::serialization::commands;
 namespace events = unreal_debugger::serialization::events;
 
+//////////////////////////////////////////////////////////////////////////////
+// Service control
+//////////////////////////////////////////////////////////////////////////////
+
+// Start the debugger service
 void start_debugger_service();
+
+// Test if the debugger service is running, starting if it not and not
+// in shutdown mode.
 bool check_service();
 
 enum class service_state : char
@@ -34,6 +42,7 @@ enum class service_state : char
 
 extern std::atomic<service_state> state;
 
+// An object representing the debugger state.
 class DebuggerService
 {
 public:
@@ -112,25 +121,20 @@ private:
     std::optional<events::unlock_list> pending_unlocks_[3];
 
     // A queue of serialized messages waiting to be sent.
-    std::deque<serialization::message> send_queue_;
-
-    // Synchronization between the worker thread (reading debugger commands) and
-    // the calls from Unreal (writing debugger events).
-    std::mutex mu_;
+    serialization::locked_message_queue send_queue_;
+    
+    // The command message currently being read from the debugger client.
+    // There is only a single element, not a queue, because only a single
+    // thread reads these messages and they are processed entirely before the
+    // next one is read.
+    serialization::message next_command_;
 
     using tcp = boost::asio::ip::tcp;
 
     std::unique_ptr<tcp::acceptor> acceptor_;
-
     std::unique_ptr<tcp::socket> socket_;
 
-    serialization::message next_message_;
-
     bool connected_ = false;
-
-    bool building_call_stack_ = false;
-    std::string current_stack_frame_name_;
-    int current_stack_frame_line_;
     bool send_watch_info_ = true;
 };
 
