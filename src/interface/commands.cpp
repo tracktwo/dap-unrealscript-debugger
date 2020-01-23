@@ -11,13 +11,15 @@
 // This is done simply for error checking to try to ensure the commands we get make sense
 // instead of trusting a raw string sent over the network.
 
+namespace unreal_debugger::interface
+{
 namespace serialization = unreal_debugger::serialization;
 namespace commands = serialization::commands;
 
 // Given the message received over the wire, deserialize it into structured form and
 // call the appropriate debugger service function to re-encode it as a string for the
 // unreal callback.
-void DebuggerService::dispatch_command(const serialization::message& msg)
+void debugger_service::dispatch_command(const serialization::message& msg)
 {
     char* buf = msg.buf_.get();
     commands::command_kind k = serialization::deserialize_command_kind(buf);
@@ -43,54 +45,54 @@ void DebuggerService::dispatch_command(const serialization::message& msg)
     throw std::runtime_error("Unexpected command type");
 }
 
-void DebuggerService::add_breakpoint(const commands::add_breakpoint& cmd)
+void debugger_service::add_breakpoint(const commands::add_breakpoint& cmd)
 {
     std::stringstream stream;
     stream << "addbreakpoint " << cmd.class_name_ << " " << cmd.line_number_;
     callback_function(stream.str().c_str());
 }
 
-void DebuggerService::remove_breakpoint(const commands::remove_breakpoint& cmd)
+void debugger_service::remove_breakpoint(const commands::remove_breakpoint& cmd)
 {
     std::stringstream stream;
     stream << "removebreakpoint " << cmd.class_name_ << " " << cmd.line_number_;
     callback_function(stream.str().c_str());
 }
 
-void DebuggerService::add_watch(const commands::add_watch& cmd)
+void debugger_service::add_watch(const commands::add_watch& cmd)
 {
     std::stringstream stream;
     stream << "addwatch " << cmd.var_name_;
     callback_function(stream.str().c_str());
 }
 
-void DebuggerService::remove_watch(const commands::remove_watch& cmd)
+void debugger_service::remove_watch(const commands::remove_watch& cmd)
 {
     std::stringstream stream;
     stream << "removewatch " << cmd.var_name_;
     callback_function(stream.str().c_str());
 }
 
-void DebuggerService::clear_watch(const commands::clear_watch& cmd)
+void debugger_service::clear_watch(const commands::clear_watch& cmd)
 {
     callback_function("clearwatch");
 }
 
-void DebuggerService::change_stack(const commands::change_stack& cmd)
+void debugger_service::change_stack(const commands::change_stack& cmd)
 {
     std::stringstream stream;
     stream << "changestack " << cmd.stack_id_;
     callback_function(stream.str().c_str());
 }
 
-void DebuggerService::set_data_watch(const commands::set_data_watch& cmd)
+void debugger_service::set_data_watch(const commands::set_data_watch& cmd)
 {
     std::stringstream stream;
     stream << "setdatawatch " << cmd.var_name_;
     callback_function(stream.str().c_str());
 }
 
-void DebuggerService::break_on_none(const commands::break_on_none& cmd)
+void debugger_service::break_on_none(const commands::break_on_none& cmd)
 {
     if (cmd.break_value_)
         callback_function("breakonnone 1");
@@ -98,33 +100,33 @@ void DebuggerService::break_on_none(const commands::break_on_none& cmd)
         callback_function("breakonnone 0");
 }
 
-void DebuggerService::break_cmd(const commands::break_cmd& cmd)
+void debugger_service::break_cmd(const commands::break_cmd& cmd)
 {
     callback_function("break");
 }
 
-void DebuggerService::stop_debugging(const commands::stop_debugging& cmd)
+void debugger_service::stop_debugging(const commands::stop_debugging& cmd)
 {
     state = service_state::shutdown;
     callback_function("stopdebugging");
 }
 
-void DebuggerService::go(const commands::go& cmd)
+void debugger_service::go(const commands::go& cmd)
 {
     callback_function("go");
 }
 
-void DebuggerService::step_into(const commands::step_into& cmd)
+void debugger_service::step_into(const commands::step_into& cmd)
 {
     callback_function("stepinto");
 }
 
-void DebuggerService::step_over(const commands::step_over& cmd)
+void debugger_service::step_over(const commands::step_over& cmd)
 {
     callback_function("stepover");
 }
 
-void DebuggerService::step_out_of(const commands::step_out_of& cmd)
+void debugger_service::step_out_of(const commands::step_out_of& cmd)
 {
     callback_function("stepoutof");
 }
@@ -137,7 +139,7 @@ void DebuggerService::step_out_of(const commands::step_out_of& cmd)
 // so the only way to get this for other stack frames is to switch frames and wait for
 // the EditorGotoLine() call. But switching frames will also send all watch information
 // for the new frame, and this is very expensive.
-void DebuggerService::toggle_watch_info(const commands::toggle_watch_info& cmd)
+void debugger_service::toggle_watch_info(const commands::toggle_watch_info& cmd)
 {
     send_watch_info_ = cmd.send_watch_info_;
 
@@ -151,4 +153,5 @@ void DebuggerService::toggle_watch_info(const commands::toggle_watch_info& cmd)
     }
 }
 
+}
 

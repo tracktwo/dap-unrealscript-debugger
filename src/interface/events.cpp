@@ -1,29 +1,32 @@
 
 #include "service.h"
 
+namespace unreal_debugger::interface
+{
+
 using namespace unreal_debugger::serialization::events;
 
-void DebuggerService::show_dll_form()
+void debugger_service::show_dll_form()
 {
     send_event(events::show_dll_form{});
 }
 
-void DebuggerService::build_hierarchy()
+void debugger_service::build_hierarchy()
 {
     send_event(events::build_hierarchy{});
 }
 
-void DebuggerService::clear_hierarchy()
+void debugger_service::clear_hierarchy()
 {
     send_event(events::clear_hierarchy{});
 }
 
-void DebuggerService::add_class_to_hierarchy(const char* class_name)
+void debugger_service::add_class_to_hierarchy(const char* class_name)
 {
     send_event(events::add_class_to_hierarchy{ class_name });
 }
 
-void DebuggerService::clear_a_watch(int watch_kind)
+void debugger_service::clear_a_watch(int watch_kind)
 {
     // Reset the watch index for this kind. See the comment on
     // add_a_watch for more details of the watch indices.
@@ -59,7 +62,7 @@ void DebuggerService::clear_a_watch(int watch_kind)
 // Unreal has three different watch types and 'ClearAWatch' can occur independently for each watch
 // kind. So, we maintain three watch indices. On 'ClearAWatch' the appropriate index is reset to 1.
 // Each 'AddAWatch' call will assign the current watch index for that watch kind and increment it.
-int DebuggerService::add_a_watch(int watch_kind, int parent, const char* name, const char* value)
+int debugger_service::add_a_watch(int watch_kind, int parent, const char* name, const char* value)
 {
     // Assign this variable the next available watch number in the given list.
     int idx = watch_indices_[watch_kind]++;
@@ -73,7 +76,7 @@ int DebuggerService::add_a_watch(int watch_kind, int parent, const char* name, c
     return idx;
 }
 
-void DebuggerService::lock_list(int watch_kind)
+void debugger_service::lock_list(int watch_kind)
 {
     if (!send_watch_info_)
         return;
@@ -86,7 +89,7 @@ void DebuggerService::lock_list(int watch_kind)
     send_event(events::lock_list{ watch_kind });
 }
 
-void DebuggerService::unlock_list(int watch_kind)
+void debugger_service::unlock_list(int watch_kind)
 {
     if (!send_watch_info_)
         return;
@@ -98,42 +101,44 @@ void DebuggerService::unlock_list(int watch_kind)
     send_event(unlock);
 }
 
-void DebuggerService::add_breakpoint(const char* class_name, int line_number)
+void debugger_service::add_breakpoint(const char* class_name, int line_number)
 {
     send_event(events::add_breakpoint{ class_name, line_number });
 }
 
-void DebuggerService::remove_breakpoint(const char* class_name, int line_number)
+void debugger_service::remove_breakpoint(const char* class_name, int line_number)
 {
     send_event(events::remove_breakpoint{ class_name, line_number });
 }
 
-void DebuggerService::editor_load_class(const char* class_name)
+void debugger_service::editor_load_class(const char* class_name)
 {
     send_event(events::editor_load_class{ class_name });
 }
 
-void DebuggerService::editor_goto_line(int line_number, int highlight)
+void debugger_service::editor_goto_line(int line_number, int highlight)
 {
     send_event(events::editor_goto_line{ line_number, static_cast<bool>(highlight) });
 }
 
-void DebuggerService::add_line_to_log(const char* text)
+void debugger_service::add_line_to_log(const char* text)
 {
     send_event(events::add_line_to_log{ text });
 }
 
-void DebuggerService::call_stack_clear()
+void debugger_service::call_stack_clear()
 {
     send_event(events::call_stack_clear{});
 }
 
-void DebuggerService::call_stack_add(const char* entry)
+void debugger_service::call_stack_add(const char* entry)
 {
     send_event(events::call_stack_add{ entry });
 }
 
-void DebuggerService::set_current_object_name(const char* object_name)
+void debugger_service::set_current_object_name(const char* object_name)
 {
     send_event(events::set_current_object_name{ object_name });
+}
+
 }

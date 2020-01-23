@@ -22,8 +22,10 @@
 #include <stdio.h>
 #include "service.h"
 
+using namespace unreal_debugger::interface;
+
 // The callback function provided by unreal.
-UnrealCallback callback_function = nullptr;
+UnrealCallback unreal_debugger::interface::callback_function = nullptr;
 
 // Unreal's debugging API doesn't have an explicit 'stop' command. See AddLineToLog for more details
 // on the use of this special string.

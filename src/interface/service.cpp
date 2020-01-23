@@ -6,7 +6,10 @@
 
 #include "service.h"
 
-std::unique_ptr<DebuggerService> service;
+namespace unreal_debugger::interface
+{
+
+std::unique_ptr<debugger_service> service;
 boost::asio::io_context ios;
 std::thread worker;
 std::atomic<service_state> state;
@@ -15,11 +18,11 @@ namespace asio = boost::asio;
 
 static const int default_port = 10077;
 
-DebuggerService::DebuggerService() :
+debugger_service::debugger_service() :
     watch_indices_{1, 1, 1}
 {}
 
-void DebuggerService::start()
+void debugger_service::start()
 {
     // TODO Add environment var for port override?
     int port = default_port;
@@ -41,14 +44,14 @@ void DebuggerService::start()
 // (note that this flag is an atomic). In the stopped state the debugger will attempt to
 // cleanly shutdown all of its state (including closing the socket and halting the IO
 // thread) and then restart itself.
-void DebuggerService::stop()
+void debugger_service::stop()
 {
     state = service_state::stopped;
 }
 
 // Shutdown the debugger with no restart. This is intended to be called when Unreal initiates
 // a debugger shutdown (via a toggledebugger console command).
-void DebuggerService::shutdown()
+void debugger_service::shutdown()
 {
     // Send a 'terminated' event to the debugger client so it knows unreal has stopped the debugger.
     send_event(events::terminated{});
@@ -56,7 +59,7 @@ void DebuggerService::shutdown()
 }
 
 // Log an error message to the console and stop the current debugger.
-void DebuggerService::fatal_error(const char* msg, ...)
+void debugger_service::fatal_error(const char* msg, ...)
 {
     va_list args;
     printf("Debugger Fatal Error: ");
@@ -68,7 +71,7 @@ void DebuggerService::fatal_error(const char* msg, ...)
 
 // Receive and process the next command message from the client. Since there is only ever a single IO thread reading
 // these messages access to the next message object does not need to be synchronized.
-void DebuggerService::receive_next_message()
+void debugger_service::receive_next_message()
 {
     // Register a handler to read the command header.
     async_read(*socket_, boost::asio::buffer(&next_command_.len_, 4), [this](const boost::system::error_code& ec, std::size_t len) {
@@ -114,7 +117,7 @@ void DebuggerService::receive_next_message()
 }
 
 // Asynchronously wait for the next connection.
-void DebuggerService::accept_connection()
+void debugger_service::accept_connection()
 {
     acceptor_->async_accept([this](const boost::system::error_code& ec, tcp::socket socket) {
         // We have a new connection.
@@ -126,7 +129,7 @@ void DebuggerService::accept_connection()
 
 // Enqueues a message to send to the debugger client. If the queue is
 // currently empty it will also initiate an async send of the message.
-void DebuggerService::send_event(const events::event& ev)
+void debugger_service::send_event(const events::event& ev)
 {
     bool is_empty = false;
 
@@ -142,7 +145,7 @@ void DebuggerService::send_event(const events::event& ev)
 // Send the next message over the wire via an async send. The completion handler for
 // this send will schedule the sending of the next message if the queue is not empty
 // when it completes.
-void DebuggerService::send_next_message()
+void debugger_service::send_next_message()
 {
     // This must be on the single IO writer thread, so nobody else can be emptying the queue
     // while we're processing this message. We don't need to lock access to this top element while
@@ -204,7 +207,7 @@ void start_debugger_service()
     if (service)
         service.release();
 
-    service = std::make_unique<DebuggerService>();
+    service = std::make_unique<debugger_service>();
 
     // Start listening for connections.
     service->start();
@@ -275,5 +278,7 @@ bool check_service()
         state = service_state::stopped;
         return check_service();
     }
+}
+
 }
 

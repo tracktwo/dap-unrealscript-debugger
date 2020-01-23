@@ -11,6 +11,9 @@
 #include "events.h"
 #include "commands.h"
 
+namespace unreal_debugger::interface
+{
+
 namespace serialization = unreal_debugger::serialization;
 namespace commands = unreal_debugger::serialization::commands;
 namespace events = unreal_debugger::serialization::events;
@@ -45,11 +48,11 @@ enum class service_state : char
 extern std::atomic<service_state> state;
 
 // An object representing the debugger state.
-class DebuggerService
+class debugger_service
 {
 public:
-    DebuggerService();
-    ~DebuggerService() = default;
+    debugger_service();
+    ~debugger_service() = default;
 
     void start();
     void stop();
@@ -107,12 +110,10 @@ public:
     void toggle_watch_info(const commands::toggle_watch_info& cmd);
 
 private:
-
     void send_event(const events::event& ev);
     void send_next_message();
     void receive_next_message();
     void accept_connection();
-
     void fatal_error(const char* msg, ...);
 
     // Maintain a record of the indices we have assigned to each of the three
@@ -152,4 +153,7 @@ using UnrealCallback = void (*)(const char *);
 extern UnrealCallback callback_function;
 
 // Exactly one service can exist at a time. This is built when the unreal debugger stats.
-extern std::unique_ptr<DebuggerService> service;
+extern std::unique_ptr<debugger_service> service;
+
+}
+
