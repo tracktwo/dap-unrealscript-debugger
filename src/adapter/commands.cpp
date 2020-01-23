@@ -1,75 +1,74 @@
 
 #include "client.h"
 
-namespace client
+namespace unreal_debugger::client
 {
-    namespace commands
-    {
-        namespace commands = unreal_debugger::serialization::commands;
 
-        void remove_breakpoints(const std::string& class_name, int line)
-        {
-            throw std::runtime_error("NYI");
-        }
+namespace commands = unreal_debugger::serialization::commands;
 
-        void stop_debugging()
-        {
-            send_command(commands::stop_debugging{});
-        }
+void remove_breakpoints(const std::string& class_name, int line)
+{
+    throw std::runtime_error("NYI");
+}
 
-        void add_breakpoint(const std::string& class_name, int line)
-        {
-            send_command(commands::add_breakpoint{ class_name, line });
-        }
+void stop_debugging()
+{
+    send_command(commands::stop_debugging{});
+}
 
-        void break_cmd()
-        {
-            send_command(commands::break_cmd{});
-        }
+void add_breakpoint(const std::string& class_name, int line)
+{
+    send_command(commands::add_breakpoint{ class_name, line });
+}
 
-        void go()
-        {
-            send_command(commands::go{});
-        }
+void break_cmd()
+{
+    send_command(commands::break_cmd{});
+}
 
-        void step_over()
-        {
-            send_command(commands::step_over{});
-        }
+void go()
+{
+    send_command(commands::go{});
+}
 
-        void step_into()
-        {
-            send_command(commands::step_into{});
-        }
+void step_over()
+{
+    send_command(commands::step_over{});
+}
 
-        void step_outof()
-        {
-            send_command(commands::step_out_of{});
-        }
+void step_into()
+{
+    send_command(commands::step_into{});
+}
 
-        void change_stack(int stack_id)
-        {
-            send_command(commands::change_stack{ stack_id });
-        }
+void step_outof()
+{
+    send_command(commands::step_out_of{});
+}
 
-        void set_data_watch(const std::string& var_name)
-        {
-            send_command(commands::set_data_watch{ var_name });
-        }
+void change_stack(int stack_id)
+{
+    send_command(commands::change_stack{ stack_id });
+}
 
-        void add_watch(const std::string& var_name)
-        {
-            send_command(commands::add_watch{ var_name });
-        }
+void set_data_watch(const std::string& var_name)
+{
+    send_command(commands::set_data_watch{ var_name });
+}
 
-        void clear_watch()
-        {
-            send_command(commands::clear_watch{});
-        }
+void add_watch(const std::string& var_name)
+{
+    send_command(commands::add_watch{ var_name });
+}
 
-        void toggle_watch_info(bool b)
-        {
-            send_command(commands::toggle_watch_info{ b });
-        }
-    }
+void clear_watch()
+{
+    send_command(commands::clear_watch{});
+}
+
+void toggle_watch_info(bool b)
+{
+    send_command(commands::toggle_watch_info{ b });
+}
+
 }

@@ -1,6 +1,6 @@
 #pragma once
 
-namespace signals
+namespace unreal_debugger::client::signals
 {
     class signal {
     public:

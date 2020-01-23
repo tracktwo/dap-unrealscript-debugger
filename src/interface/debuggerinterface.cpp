@@ -48,6 +48,7 @@ extern "C"
     // TODO Handle autodebug support
     __declspec(dllexport) void ShowDllForm()
     {
+        // FIXME This can't be a static, it needs to be reset whenever there is a toggledebugger cycle.
         static bool is_break = false;
 
         if (!is_break)
@@ -150,7 +151,15 @@ extern "C"
     // A line has been added to the log
     __declspec(dllexport) void AddLineToLog(const char* text)
     {
-        if (check_service())
+        if (strcmp(text, magic_debugger_stopped_log_entry) == 0)
+        {
+            if (check_service())
+                service->shutdown();
+            // Run the check_service utility to initiate the shutdown, since unreal won't be calling us again.
+            state = service_state::shutdown;
+            check_service();
+        }
+        else if (check_service())
         {
             service->add_line_to_log(text);
 
@@ -166,12 +175,6 @@ extern "C"
             // has requested a stop via the "stopdebugger" command. This will only be hit for the former case,
             // as when we process "stopdebugger" we have already toggled the state to 'shutdown' and check_service
             // will not return true.
-            if (strcmp(text, magic_debugger_stopped_log_entry) == 0)
-            {
-                service->shutdown();
-                // Run the check_service utility to initiate the shutdown, since unreal won't be calling us again.
-                check_service();
-            }
         }
     }
 

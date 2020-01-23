@@ -2,6 +2,9 @@
 #include <string>
 #include <vector>
 
+namespace unreal_debugger::client
+{
+
 class Debugger
 {
 public:
@@ -88,3 +91,6 @@ private:
 };
 
 extern Debugger debugger;
+
+}
+

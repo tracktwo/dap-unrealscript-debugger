@@ -4,6 +4,9 @@
 #include "adapter.h"
 #include "signals.h"
 
+namespace unreal_debugger::client
+{
+
 namespace serialization = unreal_debugger::serialization;
 namespace events = serialization::events;
 
@@ -91,6 +94,8 @@ void set_current_object_name(const events::set_current_object_name& ev)
     }
 }
 
+// FIXME This is a terminated event from the interface and needs to close down the adapter. It should be in
+// a better place.
 void terminated(const events::terminated& ev)
 {
     debugger_terminated();
@@ -122,4 +127,6 @@ void dispatch_event(const serialization::message& msg)
     }
 
     throw std::runtime_error("Unexpected event type");
+}
+
 }

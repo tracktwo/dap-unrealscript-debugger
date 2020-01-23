@@ -17,6 +17,34 @@
 #include "debugger.h"
 #include "signals.h"
 
+// Define a custom "launch" request type so we can receive specific launch parameters from
+// vscode.
+namespace dap
+{
+    struct UnrealLaunchRequest : LaunchRequest
+    {
+        using Response = LaunchResponse;
+
+        UnrealLaunchRequest() = default;
+        ~UnrealLaunchRequest() = default;
+
+        // A vector of strings for the list of source roots.
+        optional<array<string>> sourceRoots;
+    };
+
+
+    DAP_DECLARE_STRUCT_TYPEINFO(UnrealLaunchRequest);
+
+    DAP_IMPLEMENT_STRUCT_TYPEINFO(UnrealLaunchRequest,
+        "launch",
+        DAP_FIELD(restart, "__restart"),
+        DAP_FIELD(noDebug, "noDebug"),
+        DAP_FIELD(sourceRoots, "sourceRoots"));
+}
+
+namespace unreal_debugger::client
+{
+
 LARGE_INTEGER last_time;
 LARGE_INTEGER freq;
 
@@ -271,31 +299,6 @@ namespace util
     }
 }
 
-// Define a custom "launch" request type so we can receive specific launch parameters from
-// vscode.
-namespace dap
-{
-    struct UnrealLaunchRequest : LaunchRequest
-    {
-        using Response = LaunchResponse;
-
-        UnrealLaunchRequest() = default;
-        ~UnrealLaunchRequest() = default;
-
-        // A vector of strings for the list of source roots.
-        optional<array<string>> sourceRoots;
-    };
-
-
-    DAP_DECLARE_STRUCT_TYPEINFO(UnrealLaunchRequest);
-
-    DAP_IMPLEMENT_STRUCT_TYPEINFO(UnrealLaunchRequest,
-        "launch",
-        DAP_FIELD(restart, "__restart"),
-        DAP_FIELD(noDebug, "noDebug"),
-        DAP_FIELD(sourceRoots, "sourceRoots"));
-}
-
 namespace handlers
 {
     void error_handler(const char* msg)
@@ -348,7 +351,7 @@ namespace handlers
 
     dap::DisconnectResponse disconnect(const dap::DisconnectRequest& request)
     {
-        client::commands::stop_debugging();
+        stop_debugging();
         return {};
     }
 
@@ -374,7 +377,7 @@ namespace handlers
         {
 
             // TODO add the breakpint to the debugger state.
-            client::commands::add_breakpoint(class_name, breakpoints[i].line);
+            add_breakpoint(class_name, breakpoints[i].line);
             // We have no real way to know if the breakpoint addition worked, so just say it's good.
             response.breakpoints[i].verified = true;
         }
@@ -441,12 +444,12 @@ namespace handlers
                 // when swapping frames to build a call stack.
                 if (!disabled_watch_info)
                 {
-                    client::commands::toggle_watch_info(false);
+                    toggle_watch_info(false);
                     disabled_watch_info = true;
                 }
 
                 // Request a stack change and wait for the line number to be received.
-                client::commands::change_stack(frame_index);
+                change_stack(frame_index);
                 signals::line_received.wait();
                 signals::line_received.reset();
                 debugger.set_state(Debugger::State::normal);
@@ -475,7 +478,7 @@ namespace handlers
         if (previous_frame != debugger.get_current_frame_index())
         {
             debugger.set_current_frame_index(previous_frame);
-            client::commands::change_stack(previous_frame);
+            change_stack(previous_frame);
             debugger.set_state(Debugger::State::waiting_for_frame_line);
             signals::line_received.wait();
             signals::line_received.reset();
@@ -485,7 +488,7 @@ namespace handlers
         // If we asked the debugger to stop sending watch info, turn it back on now
         if (disabled_watch_info)
         {
-            client::commands::toggle_watch_info(true);
+            toggle_watch_info(true);
         }
 
         response.totalFrames = debugger.get_callstack().size();
@@ -535,7 +538,7 @@ namespace handlers
         debugger.set_state(Debugger::State::waiting_for_frame_watches);
 
         // Request a stack change and wait for the watches to to be received.
-        client::commands::change_stack(frame_index);
+        change_stack(frame_index);
         signals::watches_received.wait();
         signals::watches_received.reset();
         debugger.set_state(Debugger::State::normal);
@@ -546,12 +549,12 @@ namespace handlers
             // We don't need var information for this (we already have the previous
             // frmae), so turn it off.
             debugger.set_current_frame_index(saved_frame_index);
-            client::commands::toggle_watch_info(false);
+            toggle_watch_info(false);
             debugger.set_state(Debugger::State::waiting_for_frame_line);
-            client::commands::change_stack(saved_frame_index);
+            change_stack(saved_frame_index);
             signals::line_received.wait();
             signals::line_received.reset();
-            client::commands::toggle_watch_info(true);
+            toggle_watch_info(true);
             debugger.set_state(Debugger::State::normal);
         }
 
@@ -664,7 +667,7 @@ namespace handlers
 
         // If we've failed to find this watch then we need to request it.
         debugger.set_state(Debugger::State::waiting_for_user_watches);
-        client::commands::add_watch(request.expression);
+        add_watch(request.expression);
         signals::user_watches_received.wait();
         signals::user_watches_received.reset();
         debugger.set_state(Debugger::State::normal);
@@ -686,7 +689,7 @@ namespace handlers
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.
         debugger.set_current_frame_index(0);
-        client::commands::break_cmd();
+        break_cmd();
         return {};
     }
 
@@ -695,15 +698,15 @@ namespace handlers
         while (debugger.get_state() != Debugger::State::normal)
             ;
 
-        client::commands::toggle_watch_info(true);
-        client::commands::clear_watch();
+        toggle_watch_info(true);
+        clear_watch();
 
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.
         debugger.set_current_frame_index(0);
         debugger.set_state(Debugger::State::busy);
         signals::breakpoint_hit.reset();
-        client::commands::go();
+        go();
         return {};
     }
 
@@ -712,8 +715,8 @@ namespace handlers
         while (debugger.get_state() != Debugger::State::normal)
             ;
 
-        client::commands::toggle_watch_info(true);
-        client::commands::clear_watch();
+        toggle_watch_info(true);
+        clear_watch();
 
         log_timer("next start");
         // Any code execution change results in fresh information from unreal so we need to reset
@@ -721,7 +724,7 @@ namespace handlers
         debugger.set_current_frame_index(0);
         debugger.set_state(Debugger::State::busy);
         signals::breakpoint_hit.reset();
-        client::commands::step_over();
+        step_over();
         log_timer("next end");
         return {};
     }
@@ -731,15 +734,15 @@ namespace handlers
         while (debugger.get_state() != Debugger::State::normal)
             ;
 
-        client::commands::toggle_watch_info(true);
-        client::commands::clear_watch();
+        toggle_watch_info(true);
+        clear_watch();
 
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.
         debugger.set_current_frame_index(0);
         debugger.set_state(Debugger::State::busy);
         signals::breakpoint_hit.reset();
-        client::commands::step_into();
+        client::step_into();
         return {};
     }
 
@@ -748,15 +751,15 @@ namespace handlers
         while (debugger.get_state() != Debugger::State::normal)
             ;
 
-        client::commands::toggle_watch_info(true);
-        client::commands::clear_watch();
+        client::toggle_watch_info(true);
+        client::clear_watch();
 
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.
         debugger.set_current_frame_index(0);
         debugger.set_state(Debugger::State::busy);
         signals::breakpoint_hit.reset();
-        client::commands::step_outof();
+        client::step_outof();
         return {};
     }
 }
@@ -876,4 +879,6 @@ void stop_adapter()
 {
     session.reset();
     server.reset();
+}
+
 }

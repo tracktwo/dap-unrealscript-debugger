@@ -4,6 +4,9 @@
 #include "debugger.h"
 #include "signals.h"
 
+namespace unreal_debugger::client
+{
+
 // Unreal watch names are of the form "VarName ( Type, Address )"
 // Split out and return the 'name' and 'type' portions.
 static std::pair<std::string, std::string> split_watch_name(std::string full_name)
@@ -237,4 +240,6 @@ int Debugger::find_user_watch(int frame_index, const std::string& var_name) cons
     }
 
     return -1;
+}
+
 }

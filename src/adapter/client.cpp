@@ -11,10 +11,14 @@
 #include <boost/asio.hpp>
 #include <boost/program_options.hpp>
 
+namespace po = boost::program_options;
+
+namespace unreal_debugger::client
+{
+
 static const int default_port = 10077;
 
 namespace asio = boost::asio;
-namespace po = boost::program_options;
 namespace serialization = unreal_debugger::serialization;
 using tcp = boost::asio::ip::tcp;
 
@@ -36,7 +40,6 @@ serialization::locked_message_queue send_queue;
 
 std::vector<fs::path> source_roots;
 int debug_port;
-
 
 // Schedule an async receive of the next event from the debugger interface.
 void receive_next_event()
@@ -143,8 +146,12 @@ void stop_debugger()
    ios.stop();
 }
 
+}
+
 int main(int argc, char *argv[])
 {
+    using namespace unreal_debugger::client;
+
     po::options_description desc("Options");
     desc.add_options()
         ("help,h", "show usage")
@@ -218,4 +225,3 @@ int main(int argc, char *argv[])
     log_file->close();
     stop_adapter();
 }
-

@@ -49,13 +49,12 @@ void debugger_service::stop()
     state = service_state::stopped;
 }
 
-// Shutdown the debugger with no restart. This is intended to be called when Unreal initiates
+// Tell the client that the debugger has been shut down. This is intended to be called when Unreal initiates
 // a debugger shutdown (via a toggledebugger console command).
 void debugger_service::shutdown()
 {
     // Send a 'terminated' event to the debugger client so it knows unreal has stopped the debugger.
     send_event(events::terminated{});
-    state = service_state::shutdown;
 }
 
 // Log an error message to the console and stop the current debugger.
