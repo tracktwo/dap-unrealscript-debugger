@@ -853,30 +853,30 @@ void on_connect(const std::shared_ptr<dap::ReaderWriter>& streams)
     session->bind(streams);
 }
 
-void start_debug_server()
-{
-    server = dap::net::Server::create();
-    server->start(debug_port, on_connect);
-}
-
-void stop_debug_server()
-{
-    server->stop();
-}
-
-void start_debug_local()
+void start_adapter()
 {
     create_adapter();
 
-    std::shared_ptr<dap::Reader> in = dap::file(stdin, false);
-    std::shared_ptr<dap::Writer> out = dap::file(stdout, false);
-  //  session->bind(dap::spy(in, log_file), dap::spy(out, log_file));
-    session->bind(in, out);
-    dap::writef(log_file, "Bound to in/out\n");
+    if (debug_port > 0)
+    {
+        server = dap::net::Server::create();
+        server->start(debug_port, on_connect);
+    }
+    else
+    {
+        std::shared_ptr<dap::Reader> in = dap::file(stdin, false);
+        std::shared_ptr<dap::Writer> out = dap::file(stdout, false);
+        session->bind(in, out);
+        dap::writef(log_file, "Bound to in/out\n");
+    }
 }
 
 void stop_adapter()
 {
+    if (server)
+    {
+        server->stop();
+    }
     session.reset();
     server.reset();
 }

@@ -9,6 +9,6 @@ namespace unreal_debugger::client
     void breakpoint_hit();
     void console_message(const std::string& msg);
 
+    void start_adapter();
     void stop_adapter();
-
 }

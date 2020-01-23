@@ -23,9 +23,6 @@ extern std::shared_ptr<dap::Writer> log_file;
 extern std::vector<fs::path> source_roots;
 extern int debug_port;
 
-void start_debug_server();
-void stop_debug_server();
-void start_debug_local();
 void stop_debugger();
 void debugger_terminated();
 

@@ -190,14 +190,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    if (debug_port > 0)
-    {
-        start_debug_server();
-    }
-    else
-    {
-        start_debug_local();
-    }
+    start_adapter();
 
     // Schedule an async read of the next event from the debugger, then let
     // boost::asio do its thing.
@@ -210,10 +203,6 @@ int main(int argc, char *argv[])
     // We return from 'run' when the debugger has asked to shut down. Shut down the
     // dap service.
 
-    if (debug_port > 0)
-    {
-        stop_debug_server();
-    }
     log_file->close();
     stop_adapter();
 }
