@@ -29,11 +29,10 @@ namespace signals {
     signal user_watches_received;
 }
 
-std::mutex client_mutex;
 Debugger debugger;
 bool log_enabled;
 std::shared_ptr<dap::Writer> log_file;
-std::deque<serialization::message> send_queue;
+serialization::locked_message_queue send_queue;
 
 std::vector<fs::path> source_roots;
 int debug_port;
@@ -43,62 +42,51 @@ int debug_port;
 void receive_next_event()
 {
     {
-        std::lock_guard<std::mutex> lock{ client_mutex };
-
         boost::asio::async_read(*sock, boost::asio::buffer(&next_event.len_, 4), [](const boost::system::error_code& ec, std::size_t len) {
-
+            if (ec)
             {
-                // Reaquire the lock before dispatching any events.
-                std::lock_guard<std::mutex> lock{ client_mutex };
+                dap::writef(log_file, "receiving event header error: %s", ec.message().c_str());
+                debugger_terminated();
+                return;
+            }
 
+            if (len != 4)
+            {
+                dap::writef(log_file, "failed to read next message header: read %z of 4 bytes\n", len);
+                debugger_terminated();
+                return;
+            }
+
+            // TODO Reuse existing buffer if it's big enough.
+            next_event.buf_ = std::make_unique<char[]>(next_event.len_);
+
+            boost::asio::async_read(*sock, boost::asio::buffer(next_event.buf_.get(), next_event.len_), [](const boost::system::error_code& ec, std::size_t len) {
                 if (ec)
                 {
-                    dap::writef(log_file, "receiving event header error: %s", ec.message().c_str());
+                    dap::writef(log_file, "receiving event body error: %s", ec.message().c_str());
                     debugger_terminated();
                     return;
                 }
 
-                if (len != 4)
+                if (len != next_event.len_)
                 {
-                    dap::writef(log_file, "failed to read next message header: read %z of 4 bytes\n", len);
+                    dap::writef(log_file, "failed to read next message body: received %z of %z bytes\n", len, next_event.len_);
                     debugger_terminated();
                     return;
                 }
 
-                // TODO Reuse existing buffer if it's big enough.
-                next_event.buf_ = std::make_unique<char[]>(next_event.len_);
-
-                boost::asio::async_read(*sock, boost::asio::buffer(next_event.buf_.get(), next_event.len_), [](const boost::system::error_code& ec, std::size_t len) {
-                    if (ec)
-                    {
-                        dap::writef(log_file, "receiving event body error: %s", ec.message().c_str());
-                        debugger_terminated();
-                        return;
-                    }
-
-                    if (len != next_event.len_)
-                    {
-                        dap::writef(log_file, "failed to read next message body: received %z of %z bytes\n", len, next_event.len_);
-                        debugger_terminated();
-                        return;
-                    }
-
-                    dispatch_event(next_event);
-                    next_event.buf_.reset();
-                    next_event.len_ = 0;
-                    receive_next_event();
-                });
-            }
+                dispatch_event(next_event);
+                next_event.buf_.reset();
+                next_event.len_ = 0;
+                receive_next_event();
+            });
         });
     }
 }
 
 void send_next_message()
 {
-    std::lock_guard<std::mutex> lock(client_mutex);
-
-    assert(!send_queue.empty());
-    auto&& next_msg = send_queue.front();
+    auto&& next_msg = send_queue.top();
 
     // Begin the async send of the front-most message
     async_write(*sock, asio::buffer(&next_msg.len_, 4), [](const boost::system::error_code& ec, std::size_t n) {
@@ -113,32 +101,22 @@ void send_next_message()
         }
 
         // Now send the message body
-        auto&& next_msg = send_queue.front();
+        auto&& next_msg = send_queue.top();
         async_write(*sock, asio::buffer(next_msg.buf_.get(), next_msg.len_), [len = next_msg.len_](const boost::system::error_code& ec, std::size_t n) {
-            bool is_empty = false;
-
+            // Perform some basic error checking and log the results.
+            if (ec)
             {
-                std::lock_guard<std::mutex> lock(client_mutex);
+                dap::writef(log_file, "sending command received error: %s", ec.message().c_str());
+            }
 
-                // Perform some basic error checking and log the results.
-                if (ec)
-                {
-                    dap::writef(log_file, "sending command received error: %s", ec.message().c_str());
-                }
-
-                if (n != len)
-                {
-                    dap::writef(log_file, "sending command truncated: wrote %z of %z bytes", n, len);
-                }
-
-                // Remove this message from the queue.
-                send_queue.pop_front();
-                is_empty = send_queue.empty();
+            if (n != len)
+            {
+                dap::writef(log_file, "sending command truncated: wrote %z of %z bytes", n, len);
             }
 
             // If the queue was not empty after removing this just-sent message, schedule the async send of the next message in the queue.
             // If the queue was empty the send will be scheduled by the next command that gets enqueued via send_command.
-            if (!is_empty)
+            if (!send_queue.pop())
             {
                 send_next_message();
             }
@@ -149,20 +127,10 @@ void send_next_message()
 // Enqueue the given command to send to the debugger interface.
 void send_command(const commands::command& cmd)
 {
-    bool is_empty = false;
-
-    {
-        std::lock_guard<std::mutex> lock(client_mutex);
-
-      //  dap::writef(log_file, "Sending command %s\n", cmd.Kind_Name(cmd.kind()).c_str());
-        unreal_debugger::serialization::message msg = cmd.serialize();
-
-        is_empty = send_queue.empty();
-        send_queue.push_back(std::move(msg));
-    }
+    unreal_debugger::serialization::message msg = cmd.serialize();
 
     // If the queue was empty before we added this message, begin the async send.
-    if (is_empty)
+    if (send_queue.push(std::move(msg)))
     {
         send_next_message();
     }

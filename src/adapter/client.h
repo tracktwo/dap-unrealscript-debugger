@@ -21,7 +21,7 @@ extern std::vector<fs::path> source_roots;
 extern int debug_port;
 
 // Message passing
-extern std::deque<serialization::message> send_queue;
+extern serialization::locked_message_queue send_queue;
 void send_command(const commands::command& command);
 void dispatch_event(const serialization::message& msg);
 
