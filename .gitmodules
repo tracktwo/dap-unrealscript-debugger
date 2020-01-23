@@ -1,6 +1,3 @@
-[submodule "third_party/azmq"]
-	path = third_party/azmq
-	url = https://github.com/zeromq/azmq
 [submodule "third_party/cppdap"]
 	path = third_party/cppdap
 	url = https://github.com/google/cppdap
