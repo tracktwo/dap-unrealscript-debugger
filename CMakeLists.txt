@@ -14,13 +14,12 @@ set (CMAKE_CXX_STANDARD 17)
 string(REGEX REPLACE " /W[0-4]" "" CMAKE_C_FLAGS ${CMAKE_C_FLAGS})
 string(REGEX REPLACE " /W[0-4]" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
 
-# TODO Interface could use DLL version
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 # Dependencies
 
 set (Boost_USE_STATIC_LIBS ON)
-find_package(Boost REQUIRED COMPONENTS "program_options")
+find_package(Boost REQUIRED)
 include_directories(${Boost_INCLUDE_DIR})
 
 # Third party utilities included in build
@@ -57,7 +56,6 @@ set (DBGIFACE_HDRS
 
 add_library(DebuggerInterface SHARED ${DBGIFACE_SRCS} ${DBGIFACE_HDRS})
 target_compile_options(DebuggerInterface PRIVATE "-permissive-")
-target_link_options(DebuggerInterface PRIVATE "/MAP")
 
 if (DebuggerInterface_INSTALL)
     install(TARGETS DebuggerInterface RUNTIME DESTINATION "${DebuggerInterface_INSTALL_BINDIR}")
@@ -83,8 +81,7 @@ set (DBGADAPTER_HDRS
 
 add_executable(DebuggerAdapter ${DBGADAPTER_SRCS} ${DBGADAPTER_HDRS})
 target_compile_options(DebuggerAdapter PRIVATE "-permissive-")
-target_link_libraries(DebuggerAdapter PRIVATE cppdap ${Boost_LIBRARIES})
-target_link_options(DebuggerAdapter PRIVATE "/MAP")
+target_link_libraries(DebuggerAdapter PRIVATE cppdap)
 
 if (DebuggerAdapter_INSTALL)
     install(TARGETS DebuggerAdapter RUNTIME DESTINATION "${DebuggerAdapter_INSTALL_BINDIR}")

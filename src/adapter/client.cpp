@@ -11,8 +11,6 @@
 #include <boost/asio.hpp>
 #include <boost/program_options.hpp>
 
-namespace po = boost::program_options;
-
 namespace unreal_debugger::client
 {
 
@@ -152,20 +150,14 @@ int main(int argc, char *argv[])
 {
     using namespace unreal_debugger::client;
 
-    po::options_description desc("Options");
-    desc.add_options()
-        ("help,h", "show usage")
-        ("debug_port,d", po::value<int>(&debug_port)->default_value(0), "listen for client connections on <port> instead of stdin/stdout")
-        ;
+    // Currently only accepts 1 command line option: -debug <port>
 
-    po::variables_map vm;
-    po::store(po::parse_command_line(argc, argv, desc), vm);
-    po::notify(vm);
-
-    if (vm.count("help"))
+    if (argc >= 3)
     {
-        std::cout << desc << std::endl;
-        return 0;
+        if (strcmp(argv[1], "-debug") == 0)
+        {
+            debug_port = atoi(argv[2]);
+        }
     }
 
     if (debug_port > 0)
