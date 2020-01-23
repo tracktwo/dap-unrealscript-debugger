@@ -48,16 +48,13 @@ extern "C"
     {
         static bool is_break = false;
 
-        if (check_service())
+        if (!is_break)
         {
-            if (!is_break)
-            {
-                is_break = true;
-            }
-            else
-            {
-                service->show_dll_form();
-            }
+            is_break = true;
+        }
+        else if (check_service())
+        {
+            service->show_dll_form();
         }
     }
 

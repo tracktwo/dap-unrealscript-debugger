@@ -1,6 +1,5 @@
 
-// Initialize the debugger service. Note that Unreal may call this many times,
-// so it must track its own state.
+#pragma once
 
 #include <memory>
 #include <deque>
@@ -33,8 +32,11 @@ enum class service_state : char
     // the debugger service will attempt to shut down any existing service, then start a new one.
     stopped,
 
-    // The service is currently running.
-    running,
+    // The service is currently running, but we do not have an active connection
+    disconnected,
+
+    // The service is running and is connected to a debug client.
+    connected,
 
     // We have received a shutdown request from the client. The service should be stopped, and not restarted.
     shutdown
@@ -47,6 +49,7 @@ class DebuggerService
 {
 public:
     DebuggerService();
+    ~DebuggerService() = default;
 
     void start();
     void stop();
@@ -105,20 +108,27 @@ public:
 
 private:
 
-    using Lock = std::lock_guard<std::mutex>;
-
     void send_event(const events::event& ev);
     void send_next_message();
     void receive_next_message();
     void accept_connection();
 
-    std::thread worker_;
+    void fatal_error(const char* msg, ...);
 
     // Maintain a record of the indices we have assigned to each of the three
    // watch kinds unreal implements. These values are used by clear_a_watch
     // and add_a_watch.
     int watch_indices_[3];
+
+    // In order to optimize sending watch info we buffer all "AddAWatch" API calls
+    // into a single message that will be sent when the watch list is unlocked.
+    // This relies on the fact that Unreal consistently locks and unlocks the list
+    // around any AddAWatch call.
     std::optional<events::unlock_list> pending_unlocks_[3];
+
+    // If true, we are sending watch info to the client. If false, all lock, unlock,
+    // and add watch events are silently discarded.
+    bool send_watch_info_ = true;
 
     // A queue of serialized messages waiting to be sent.
     serialization::locked_message_queue send_queue_;
@@ -131,11 +141,9 @@ private:
 
     using tcp = boost::asio::ip::tcp;
 
+    // Listening acceptor and the connected socket.
     std::unique_ptr<tcp::acceptor> acceptor_;
     std::unique_ptr<tcp::socket> socket_;
-
-    bool connected_ = false;
-    bool send_watch_info_ = true;
 };
 
 // The callback function back into unreal just takes a simple string argument

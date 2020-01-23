@@ -24,9 +24,12 @@ void DebuggerService::start()
     // TODO Add environment var for port override?
     int port = default_port;
 
+    // Create the acceptor to listen for connections.
     acceptor_ = std::make_unique<tcp::acceptor>(ios, tcp::endpoint(tcp::v4(), port));
 
-    state = service_state::running;
+    // We are now in the disconnected state: the debugger service is up and running, but not yet
+    // connected.
+    state = service_state::disconnected;
 
     // Queue the next connection
     accept_connection();
@@ -52,24 +55,31 @@ void DebuggerService::shutdown()
     state = service_state::shutdown;
 }
 
+// Log an error message to the console and stop the current debugger.
+void DebuggerService::fatal_error(const char* msg, ...)
+{
+    va_list args;
+    printf("Debugger Fatal Error: ");
+    va_start(args, msg);
+    vprintf(msg, args);
+    va_end(args);
+    stop();
+}
+
 // Receive and process the next command message from the client. Since there is only ever a single IO thread reading
 // these messages access to the next message object does not need to be synchronized.
 void DebuggerService::receive_next_message()
 {
     // Register a handler to read the command header.
     async_read(*socket_, boost::asio::buffer(&next_command_.len_, 4), [this](const boost::system::error_code& ec, std::size_t len) {
-
-        // TODO Better error handling.
         if (ec)
         {
-            printf("UnrealDebugger: Receiving command header error: %s\n", ec.message().c_str());
-            stop();
+            fatal_error("Receiving command header error: %s\n", ec.message().c_str());
             return;
         }
         if (len != 4)
         {
-            printf("UnrealDebugger: failed to read header.");
-            stop();
+            fatal_error("Failed to read header.");
             return;
         }
 
@@ -79,18 +89,14 @@ void DebuggerService::receive_next_message()
 
         // Register a handler to read the command body
         async_read(*socket_, boost::asio::buffer(next_command_.buf_.get(), next_command_.len_), [this](const boost::system::error_code& ec, std::size_t len) {
-
-            // TODO better error handling.
             if (ec)
             {
-                printf("UnrealDebugger: Receiving command body error: %s\n", ec.message().c_str());
-                stop();
+                printf("Receiving command body error: %s\n", ec.message().c_str());
                 return;
             }
             if (len != next_command_.len_)
             {
-                printf("UnrealDebugger: failed to read body: read %z of %z bytes\n", len, next_command_.len_);
-                stop();
+                printf("Failed to read body: read %z of %z bytes\n", len, next_command_.len_);
                 return;
             }
 
@@ -107,12 +113,13 @@ void DebuggerService::receive_next_message()
     });
 }
 
+// Asynchronously wait for the next connection.
 void DebuggerService::accept_connection()
 {
     acceptor_->async_accept([this](const boost::system::error_code& ec, tcp::socket socket) {
-        // We have a new connection. Create a new websocket from the tcp socket, and start the upgrade handshake.
+        // We have a new connection.
         this->socket_ = std::make_unique<tcp::socket>(std::move(socket));
-        this->connected_ = true;
+        state = service_state::connected;
         this->receive_next_message();
     });
 }
@@ -122,10 +129,6 @@ void DebuggerService::accept_connection()
 void DebuggerService::send_event(const events::event& ev)
 {
     bool is_empty = false;
-
-    // FIXME
-    if (!connected_)
-        return;
 
     // Serialize and enqueue the next message. If the queue was empty prior to the message
     // we just enqueued, register a handler to send this message. This actual send will not be serviced
@@ -148,18 +151,14 @@ void DebuggerService::send_next_message()
 
     // Start the async send of the header for this message.
     async_write(*socket_, boost::asio::buffer(&next_msg.len_, 4), [this](const boost::system::error_code& ec, std::size_t n) {
-
-        // TODO better error handling.
         if (ec)
         {
-            printf("UnrealDebugger: Sending event header error: %s\n", ec.message().c_str());
-            stop();
+            fatal_error("Sending event header error: %s\n", ec.message().c_str());
             return;
         }
         if (n != 4)
         {
-            printf("UnrealDebugger: Sending event header truncated: wrote %z of 4 bytes\n", n);
-            stop();
+            fatal_error("Sending event header truncated: wrote %z of 4 bytes\n", n);
             return;
         }
 
@@ -168,17 +167,14 @@ void DebuggerService::send_next_message()
 
         // Start the async send of the message body
         async_write(*socket_, boost::asio::buffer(next_msg.buf_.get(), next_msg.len_), [this, len = next_msg.len_](boost::system::error_code ec, std::size_t n) {
-            // TODO Better error handling
             if (ec)
             {
-                printf("UnrealDebugger: Sending event body error: %s\n", ec.message().c_str());
-                stop();
+                fatal_error("Sending event body error: %s\n", ec.message().c_str());
                 return;
             }
             if (n != len)
             {
-                printf("UnrealDebugger: Sending event body truncated: wrote %z of %z bytes\n", n, len);
-                stop();
+                fatal_error("Sending event body truncated: wrote %z of %z bytes\n", n, len);
                 return;
             }
 
@@ -261,11 +257,17 @@ bool check_service()
         {
             start_debugger_service();
             printf("Debugger service running!\n");
-            return true;
         }
+        // Return false: even though the service is possibly now running (if we restarted from 'stopped') it is not connected.
         return false;
 
-    case service_state::running:
+    case service_state::disconnected:
+        // In the disconnected state the service is healthy but cannot yet do anything. Return false but otherwise don't
+        // take any action on the service.
+        return false;
+
+    case service_state::connected:
+        // The service is healthy and connected and can service commands and events.
         return true;
 
     default:
