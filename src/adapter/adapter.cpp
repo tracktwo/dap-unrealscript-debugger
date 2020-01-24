@@ -408,10 +408,10 @@ namespace handlers
         bool disabled_watch_info = false;
 
         // Loop over frames requested by the client. The request may start at a frame > 0, and may not request all frames.
-        for (int frame_index = *request.startFrame; frame_index < client::debugger.get_callstack().size(); ++frame_index)
+        for (int frame_index = *request.startFrame; frame_index < client::debugger.callstack_size(); ++frame_index)
         {
             dap::StackFrame dap_frame;
-            stack_frame& debugger_frame = debugger.get_callstack()[frame_index];
+            const stack_frame& debugger_frame = debugger.get_stack_frame(frame_index);
 
             if (debugger_frame.line_number == 0)
             {
@@ -470,7 +470,7 @@ namespace handlers
             toggle_watch_info(true);
         }
 
-        response.totalFrames = static_cast<int>(debugger.get_callstack().size());
+        response.totalFrames = static_cast<int>(debugger.callstack_size());
 
         return response;
     }
@@ -487,9 +487,9 @@ namespace handlers
         scope.name = "Locals";
         scope.presentationHint = "locals";
         scope.variablesReference = util::encode_variable_reference(request.frameId, 0, watch_kind::local);
-        if (debugger.get_callstack()[request.frameId].fetched_watches)
+        if (debugger.get_stack_frame(request.frameId).fetched_watches)
         {
-            scope.namedVariables = static_cast<int>(debugger.get_callstack()[request.frameId].local_watches[0].children.size());
+            scope.namedVariables = static_cast<int>(debugger.get_stack_frame(request.frameId).local_watches[0].children.size());
         }
         dap::ScopesResponse response;
         response.scopes.push_back(scope);
@@ -497,9 +497,9 @@ namespace handlers
         scope.name = "Globals";
         scope.presentationHint = {};
         scope.variablesReference = util::encode_variable_reference(request.frameId, 0, watch_kind::global);
-        if (debugger.get_callstack()[request.frameId].fetched_watches)
+        if (debugger.get_stack_frame(request.frameId).fetched_watches)
         {
-            scope.namedVariables = static_cast<int>(debugger.get_callstack()[request.frameId].global_watches[0].children.size());
+            scope.namedVariables = static_cast<int>(debugger.get_stack_frame(request.frameId).global_watches[0].children.size());
         }
         response.scopes.push_back(scope);
         return response;
@@ -515,6 +515,7 @@ namespace handlers
         change_stack(frame_index);
         signals::watches_received.wait();
         signals::watches_received.reset();
+        debugger.get_current_stack_frame().fetched_watches = true;
         debugger.set_state(debugger_state::state::normal);
 
         if (debugger.get_current_frame_index() != saved_frame_index)
@@ -531,8 +532,6 @@ namespace handlers
             toggle_watch_info(true);
             debugger.set_state(debugger_state::state::normal);
         }
-
-        debugger.get_callstack()[frame_index].fetched_watches = true;
     }
 
     dap::ResponseOrError<dap::VariablesResponse> variables_handler(const dap::VariablesRequest& request)
@@ -545,12 +544,12 @@ namespace handlers
         auto [frame_index, variable_index, watch_kind] = util::decode_variable_reference(request.variablesReference);
 
         // If we don't have watch info for this frame yet we need to collect it now.
-        if (!debugger.get_callstack()[frame_index].fetched_watches)
+        if (!debugger.get_stack_frame(frame_index).fetched_watches)
         {
             fetch_watches(frame_index);
         }
 
-        const watch_list& watch_list = debugger.get_callstack()[frame_index].get_watches(watch_kind);
+        const watch_list& watch_list = debugger.get_stack_frame(frame_index).get_watches(watch_kind);
 
         if (request.start.value(0) != 0 || request.count.value(0) != 0)
         {
@@ -622,12 +621,12 @@ namespace handlers
 
         int frame_index = request.frameId ? static_cast<int>(*request.frameId) : 0;
 
-        if (!debugger.get_callstack()[frame_index].fetched_watches)
+        if (!debugger.get_stack_frame(frame_index).fetched_watches)
         {
             fetch_watches(frame_index);
         }
 
-        watch_list& user_watches = debugger.get_stack_frame(frame_index).user_watches;
+        const watch_list& user_watches = debugger.get_stack_frame(frame_index).user_watches;
 
         // If we have existing watches try to find it in the list first. It will be a child
             // of the root node if so, we don't need to search arbitrary children throughout the list.

@@ -37,6 +37,11 @@ static std::pair<std::string, std::string> split_watch_name(std::string full_nam
 
 watch_list& stack_frame::get_watches(watch_kind kind)
 {
+    return const_cast<watch_list&>(const_cast<const stack_frame*>(this)->get_watches(kind));
+}
+
+const watch_list& stack_frame::get_watches(watch_kind kind) const
+{
     switch (kind)
     {
     case watch_kind::local: return local_watches;
@@ -173,6 +178,11 @@ void debugger_state::set_current_frame_index(int frame)
 int debugger_state::get_current_frame_index() const
 {
     return current_frame_;
+}
+
+const stack_frame& debugger_state::get_current_stack_frame() const
+{
+    return callstack_[current_frame_];
 }
 
 stack_frame& debugger_state::get_current_stack_frame()

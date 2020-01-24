@@ -34,6 +34,7 @@ struct stack_frame
     stack_frame(const std::string& cls, const std::string& func) : class_name(cls), function_name(func)
     {}
 
+    const watch_list& get_watches(watch_kind kind) const;
     watch_list& get_watches(watch_kind kind);
 
     std::string class_name = "";
@@ -64,9 +65,6 @@ public:
         callstack_.resize(1);
     }
 
-    std::vector<stack_frame>& get_callstack() { return callstack_; }
-    stack_frame& get_stack_frame(int idx) { return callstack_[idx]; }
-
     void clear_watch(watch_kind kind);
     void add_watch(watch_kind kind, int index, int parent, const std::string& name, const std::string& value);
 
@@ -77,7 +75,11 @@ public:
     void add_callstack(const std::string& name);
     int get_current_frame_index() const;
     void set_current_frame_index(int frame);
+    const stack_frame& get_current_stack_frame() const;
     stack_frame& get_current_stack_frame();
+    const stack_frame& get_stack_frame(int idx) const { return callstack_[idx]; }
+    size_t callstack_size() const { return callstack_.size(); }
+
     void finalize_callstack();
     void set_state(state s) { state_ = s; }
     state get_state() const { return state_; }
