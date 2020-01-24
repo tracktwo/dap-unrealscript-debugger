@@ -55,7 +55,8 @@ set (DBGIFACE_HDRS
 )
 
 add_library(DebuggerInterface SHARED ${DBGIFACE_SRCS} ${DBGIFACE_HDRS})
-target_compile_options(DebuggerInterface PRIVATE "-permissive-")
+target_compile_options(DebuggerInterface PRIVATE "-permissive-" "-W3")
+target_compile_definitions(DebuggerInterface PRIVATE "_WIN32_WINNT=0x0601")
 
 if (DebuggerInterface_INSTALL)
     install(TARGETS DebuggerInterface RUNTIME DESTINATION "${DebuggerInterface_INSTALL_BINDIR}")
@@ -80,7 +81,8 @@ set (DBGADAPTER_HDRS
 )
 
 add_executable(DebuggerAdapter ${DBGADAPTER_SRCS} ${DBGADAPTER_HDRS})
-target_compile_options(DebuggerAdapter PRIVATE "-permissive-")
+target_compile_options(DebuggerAdapter PRIVATE "-permissive-" "-W3")
+target_compile_definitions(DebuggerAdapter PRIVATE "_WIN32_WINNT=0x0601")
 target_link_libraries(DebuggerAdapter PRIVATE cppdap)
 
 if (DebuggerAdapter_INSTALL)

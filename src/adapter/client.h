@@ -7,24 +7,23 @@
 #include "commands.h"
 #include "events.h"
 
-namespace unreal_debugger::client
-{
-
 namespace fs = std::filesystem;
 namespace serialization = unreal_debugger::serialization;
 namespace commands = unreal_debugger::serialization::commands;
 namespace events = unreal_debugger::serialization::events;
 
+namespace unreal_debugger::client
+{
 // Logging
 extern bool log_enabled;
-extern std::shared_ptr<dap::Writer> log_file;
+extern FILE* log_file;
+void log(const char* msg, ...);
 
 // Options
 extern std::vector<fs::path> source_roots;
 extern int debug_port;
 
 void stop_debugger();
-void debugger_terminated();
 
 // Message passing
 extern serialization::locked_message_queue send_queue;

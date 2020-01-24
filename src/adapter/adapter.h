@@ -1,13 +1,12 @@
 
 #pragma once
-#include "commands.h"
+// Interface into the DAP adapter to communicate with the client UI.
 
-namespace unreal_debugger::client
+namespace unreal_debugger::adapter
 {
-    namespace commands = unreal_debugger::serialization::commands;
-
     void breakpoint_hit();
     void console_message(const std::string& msg);
+    void debugger_terminated();
 
     void start_adapter();
     void stop_adapter();

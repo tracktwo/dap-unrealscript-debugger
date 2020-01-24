@@ -78,8 +78,7 @@ namespace unreal_debugger::serialization::commands
             message msg;
             msg.len_ =
                 sizeof(command_kind)    // kind field
-                + sizeof(int)        // class name length
-                + class_name_.size()    // class name contents
+                + serialized_length(class_name_)    // class name string
                 + sizeof(int)           // line number
                 ;
 
@@ -118,8 +117,7 @@ namespace unreal_debugger::serialization::commands
             message msg;
             msg.len_ =
                 sizeof(command_kind)    // kind field
-                + sizeof(int)        // class name length
-                + class_name_.size()    // class name contents
+                + serialized_length(class_name_)    // class name string
                 + sizeof(int)           // line number
                 ;
 
@@ -159,8 +157,7 @@ namespace unreal_debugger::serialization::commands
             message msg;
             msg.len_ =
                 sizeof(command_kind)    // kind field
-                + sizeof(int)        // var name length
-                + var_name_.size()    // var name contents
+                + serialized_length(var_name_)    // var name string
                 ;
 
             msg.buf_ = std::make_unique<char[]>(msg.len_);
@@ -194,8 +191,7 @@ namespace unreal_debugger::serialization::commands
             message msg;
             msg.len_ =
                 sizeof(command_kind)    // kind field
-                + sizeof(int)        // var name length
-                + var_name_.size()    // var name contents
+                + serialized_length(var_name_)    // var name string
                 ;
 
             msg.buf_ = std::make_unique<char[]>(msg.len_);
@@ -289,8 +285,7 @@ namespace unreal_debugger::serialization::commands
             message msg;
             msg.len_ =
                 sizeof(command_kind)    // kind field
-                + sizeof(int)        // var name length
-                + var_name_.size()    // var name contents
+                + serialized_length(var_name_)    // var name string
                 ;
 
             msg.buf_ = std::make_unique<char[]>(msg.len_);

@@ -11,18 +11,24 @@
 #include <boost/asio.hpp>
 #include <boost/program_options.hpp>
 
-namespace unreal_debugger::client
-{
-
-static const int default_port = 10077;
 
 namespace asio = boost::asio;
 namespace serialization = unreal_debugger::serialization;
 using tcp = boost::asio::ip::tcp;
 
+namespace unreal_debugger::client
+{
+
+static const int default_port = 10077;
 boost::asio::io_context ios;
 std::unique_ptr<tcp::socket> sock;
+serialization::locked_message_queue send_queue;
 serialization::message next_event;
+std::vector<fs::path> source_roots;
+int debug_port;
+debugger_state debugger;
+bool log_enabled;
+FILE* log_file;
 
 namespace signals {
     signal line_received;
@@ -31,14 +37,6 @@ namespace signals {
     signal user_watches_received;
 }
 
-Debugger debugger;
-bool log_enabled;
-std::shared_ptr<dap::Writer> log_file;
-serialization::locked_message_queue send_queue;
-
-std::vector<fs::path> source_roots;
-int debug_port;
-
 // Schedule an async receive of the next event from the debugger interface.
 void receive_next_event()
 {
@@ -46,15 +44,15 @@ void receive_next_event()
         boost::asio::async_read(*sock, boost::asio::buffer(&next_event.len_, 4), [](const boost::system::error_code& ec, std::size_t len) {
             if (ec)
             {
-                dap::writef(log_file, "receiving event header error: %s", ec.message().c_str());
-                debugger_terminated();
+                log("receiving event header error: %s", ec.message().c_str());
+                adapter::debugger_terminated();
                 return;
             }
 
             if (len != 4)
             {
-                dap::writef(log_file, "failed to read next message header: read %z of 4 bytes\n", len);
-                debugger_terminated();
+                log("failed to read next message header: read %z of 4 bytes\n", len);
+                adapter::debugger_terminated();
                 return;
             }
 
@@ -64,15 +62,15 @@ void receive_next_event()
             boost::asio::async_read(*sock, boost::asio::buffer(next_event.buf_.get(), next_event.len_), [](const boost::system::error_code& ec, std::size_t len) {
                 if (ec)
                 {
-                    dap::writef(log_file, "receiving event body error: %s", ec.message().c_str());
-                    debugger_terminated();
+                    log("receiving event body error: %s", ec.message().c_str());
+                    adapter::debugger_terminated();
                     return;
                 }
 
                 if (len != next_event.len_)
                 {
-                    dap::writef(log_file, "failed to read next message body: received %z of %z bytes\n", len, next_event.len_);
-                    debugger_terminated();
+                    log("failed to read next message body: received %z of %z bytes\n", len, next_event.len_);
+                    adapter::debugger_terminated();
                     return;
                 }
 
@@ -93,12 +91,12 @@ void send_next_message()
     async_write(*sock, asio::buffer(&next_msg.len_, 4), [](const boost::system::error_code& ec, std::size_t n) {
         if (ec)
         {
-            dap::writef(log_file, "sending command header received error: %s", ec.message().c_str());
+            log("sending command header received error: %s", ec.message().c_str());
         }
 
         if (n != 4)
         {
-            dap::writef(log_file, "sending command header truncated: wrote %z of 4 bytes", n);
+            log("sending command header truncated: wrote %z of 4 bytes", n);
         }
 
         // Now send the message body
@@ -107,12 +105,12 @@ void send_next_message()
             // Perform some basic error checking and log the results.
             if (ec)
             {
-                dap::writef(log_file, "sending command received error: %s", ec.message().c_str());
+                log("sending command received error: %s", ec.message().c_str());
             }
 
             if (n != len)
             {
-                dap::writef(log_file, "sending command truncated: wrote %z of %z bytes", n, len);
+                log("sending command truncated: wrote %z of %z bytes", n, len);
             }
 
             // If the queue was not empty after removing this just-sent message, schedule the async send of the next message in the queue.
@@ -144,65 +142,69 @@ void stop_debugger()
    ios.stop();
 }
 
+void log(const char* msg, ...)
+{
+    if (!log_enabled)
+        return;
+
+    va_list args;
+    va_start(args, msg);
+    vfprintf(log_file, msg, args);
+    va_end(args);
+}
+
 }
 
 int main(int argc, char *argv[])
 {
-    using namespace unreal_debugger::client;
+    using namespace unreal_debugger;
 
     // Currently only accepts 1 command line option: -debug <port>
 
-    if (argc >= 3)
+    for (int i = 1; i < argc; ++i)
     {
-        if (strcmp(argv[1], "-debug") == 0)
+        if (strcmp(argv[i], "-debug") == 0 && ((i+1) < argc))
         {
-            debug_port = atoi(argv[2]);
+            client::debug_port = atoi(argv[2]);
         }
     }
 
-    if (debug_port > 0)
+    if (client::debug_port > 0)
     {
         // In debug mode we are communicating to VS over a tcp port rather than over stdin/stdout.
         // Log directly to stdout.
-        log_file = dap::file(stdout);
-        log_enabled = true;
+        client::log_file = stdout;
+        client::log_enabled = true;
     }
     else
     {
         // Change stdin and stdout to binary mode to avoid any translations
         _setmode(_fileno(stdin), _O_BINARY);
         _setmode(_fileno(stdout), _O_BINARY);
-
-        // Setup the log, if necessary
-        log_file = dap::file("C:\\users\\jonathan\\output.log");
-        log_enabled = true;
     }
 
-    dap::writef(log_file, "Started!\n");
+    client::log("Started!\n");
 
-    sock = std::make_unique<tcp::socket>(ios);
+    client::sock = std::make_unique<tcp::socket>(client::ios);
     boost::system::error_code ec;
-    sock->connect(tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), default_port), ec);
+    client::sock->connect(tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), client::default_port), ec);
     if (ec)
     {
-        dap::writef(log_file, "Connection to debugger failed: %s\n", ec.message().c_str());
-        // TODO Error message.
+        client::log("Connection to debugger failed: %s\n", ec.message().c_str());
         return 1;
     }
 
-    start_adapter();
+    adapter::start_adapter();
 
     // Schedule an async read of the next event from the debugger, then let
     // boost::asio do its thing.
-    receive_next_event();
+    client::receive_next_event();
 
     // Start running the main thread loop (responsible for reading events from the
     // debugger interface and dispatching them).
-    ios.run();
+    client::ios.run();
 
     // We return from 'run' when the debugger has asked to shut down. Shut down the
     // dap service.
-
-    log_file->close();
-    stop_adapter();
+    adapter::stop_adapter();
 }

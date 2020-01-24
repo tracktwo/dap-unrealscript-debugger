@@ -98,7 +98,7 @@ void debugger_service::receive_next_message()
             }
             if (len != next_command_.len_)
             {
-                printf("Failed to read body: read %z of %z bytes\n", len, next_command_.len_);
+                printf("Failed to read body: read %zu of %d bytes\n", len, next_command_.len_);
                 return;
             }
 

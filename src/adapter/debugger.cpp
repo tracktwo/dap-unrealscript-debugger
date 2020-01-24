@@ -31,17 +31,17 @@ static std::pair<std::string, std::string> split_watch_name(std::string full_nam
         }
     }
     // Failed to parse the type
-    dap::writef(log_file, "Failed to parse type: %s\n", full_name.c_str());
+    log("Failed to parse type: %s\n", full_name.c_str());
     return { "<unknown name>", "<unknown type>" };
 }
 
-Debugger::WatchList& Debugger::StackFrame::get_watches(WatchKind kind)
+watch_list& stack_frame::get_watches(watch_kind kind)
 {
     switch (kind)
     {
-    case WatchKind::Local: return local_watches;
-    case WatchKind::Global: return global_watches;
-    case WatchKind::User: return user_watches;
+    case watch_kind::local: return local_watches;
+    case watch_kind::global: return global_watches;
+    case watch_kind::user: return user_watches;
     default:
         abort();
     }
@@ -49,14 +49,14 @@ Debugger::WatchList& Debugger::StackFrame::get_watches(WatchKind kind)
 
 // Clear a watch list. For locals and globals they are associated with the current
 // stack frame. User watches are part of the debugger state independent of frame.
-void Debugger::clear_watch(WatchKind kind)
+void debugger_state::clear_watch(watch_kind kind)
 {
-    callstack[current_frame].get_watches(kind).clear();
+    callstack_[current_frame_].get_watches(kind).clear();
 }
 
-void Debugger::add_watch(WatchKind kind, int index, int parent, const std::string& full_name, const std::string& value)
+void debugger_state::add_watch(watch_kind kind, int index, int parent, const std::string& full_name, const std::string& value)
 {
-    WatchList& list = callstack[current_frame].get_watches(kind);
+    watch_list& list = callstack_[current_frame_].get_watches(kind);
 
     // Ensure we have a root element before adding anything more. The root element is at index 0.
     if (list.empty())
@@ -96,24 +96,24 @@ void Debugger::add_watch(WatchKind kind, int index, int parent, const std::strin
     }
 }
 
-void Debugger::lock_list(WatchKind kind)
+void debugger_state::lock_list(watch_kind kind)
 {
-    ++watch_lock_depth;
+    ++watch_lock_depth_;
 }
 
-void Debugger::unlock_list(WatchKind kind)
+void debugger_state::unlock_list(watch_kind kind)
 {
-    --watch_lock_depth;
+    --watch_lock_depth_;
 
     // If we have just unlocked the last watch list then we are done receiving watches. Signal
     // that they are available if the debugger is waiting for some watch list to complete.
-    if (watch_lock_depth == 0)
+    if (watch_lock_depth_ == 0)
     {
-        if (state == State::waiting_for_frame_watches)
+        if (state_ == state::waiting_for_frame_watches)
         {
             signals::watches_received.fire();
         }
-        else if (state == State::waiting_for_user_watches)
+        else if (state_ == state::waiting_for_user_watches)
         {
             signals::user_watches_received.fire();
         }
@@ -133,12 +133,12 @@ void Debugger::unlock_list(WatchKind kind)
 // stored the class name, line number, and watches for this one, and they should have been reset into
 // this element overwriting whatever was there before. We do need to set a flag indicating we've just
 // cleared the stack, though, so we can recognize the first add_callstack event we receive.
-void Debugger::clear_callstack()
+void debugger_state::clear_callstack()
 {
-    callstack.resize(1);
+    callstack_.resize(1);
 }
 
-void Debugger::add_callstack(const std::string& full_name)
+void debugger_state::add_callstack(const std::string& full_name)
 {
     // Callstack entries are of the form "Kind ClassName:FunctionName" (for Kind == Function).
     // The "Kind" is not of any real use for the DAP so we just strip it. It's unclear yet if
@@ -153,7 +153,7 @@ void Debugger::add_callstack(const std::string& full_name)
         std::string kind = name.substr(0, idx);
         if (kind != "Function")
         {
-            dap::writef(log_file, "Found unknown call stack kind %s\n", full_name.c_str());
+            log("Found unknown call stack kind %s\n", full_name.c_str());
         }
         name = name.substr(idx + 1);
     }
@@ -162,22 +162,22 @@ void Debugger::add_callstack(const std::string& full_name)
 
     std::string class_name = idx > 0 ? name.substr(0, idx) : name;
     std::string function_name = idx > 0 ? name.substr(idx + 1) : "";
-    callstack.emplace_back(class_name, function_name);
+    callstack_.emplace_back(class_name, function_name);
 }
 
-void Debugger::set_current_frame_index(int frame)
+void debugger_state::set_current_frame_index(int frame)
 {
-    current_frame = frame;
+    current_frame_ = frame;
 }
 
-int Debugger::get_current_frame_index() const
+int debugger_state::get_current_frame_index() const
 {
-    return current_frame;
+    return current_frame_;
 }
 
-Debugger::StackFrame& Debugger::get_current_stack_frame()
+stack_frame& debugger_state::get_current_stack_frame()
 {
-    return callstack[current_frame];
+    return callstack_[current_frame_];
 }
 
 // Unreal indexes the callstack with the top-most frame as id 0, and sends the frames
@@ -193,13 +193,13 @@ Debugger::StackFrame& Debugger::get_current_stack_frame()
 // entry 0, and "clearing" the stack removes all entries except the first.
 //
 // Once the callstack is complete, we need to copy the saved 
-void Debugger::finalize_callstack()
+void debugger_state::finalize_callstack()
 {
     // The bottom-most and top-most entries on the current call stack are the same entry, but
     // both are incomplete: only the bottom has the line number, and only the top has the function
     // name.
-    Debugger::StackFrame& bottom_frame = *callstack.begin();
-    Debugger::StackFrame& top_frame = *callstack.rbegin();
+    stack_frame& bottom_frame = *callstack_.begin();
+    stack_frame& top_frame = *callstack_.rbegin();
 
     // Copy the line number to the top-most frame.
     top_frame.line_number = bottom_frame.line_number;
@@ -209,24 +209,24 @@ void Debugger::finalize_callstack()
     std::swap(top_frame.global_watches, bottom_frame.global_watches);
 
     // Reverse the call stack so our 0th index is the top-most entry
-    std::reverse(callstack.begin(), callstack.end());
+    std::reverse(callstack_.begin(), callstack_.end());
    
     // pop off the now redundant duplicated entry we have on the end of the stack.
     // This leaves the stack with index 0 as the top-most entry, and with complete info.
-    callstack.pop_back();
+    callstack_.pop_back();
 
-    callstack[0].fetched_watches = true;
+    callstack_[0].fetched_watches = true;
 }
 
-int Debugger::find_user_watch(int frame_index, const std::string& var_name) const
+int debugger_state::find_user_watch(int frame_index, const std::string& var_name) const
 {
-    if (frame_index >= callstack.size())
+    if (frame_index >= callstack_.size())
     {
-        dap::writef(log_file, "Error: Requested user watch %s for invalid frame %d\n", var_name.c_str(), frame_index);
+        log("Error: Requested user watch %s for invalid frame %d\n", var_name.c_str(), frame_index);
         return -1;
     }
 
-    const WatchList& user_watches = callstack[frame_index].user_watches;
+    const watch_list& user_watches = callstack_[frame_index].user_watches;
 
     if (user_watches.empty() || user_watches[0].children.empty())
         return -1;

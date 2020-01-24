@@ -133,8 +133,7 @@ namespace unreal_debugger::serialization::events
             message msg;
             msg.len_ =
                 sizeof(event_kind)      // kind field
-                + sizeof(int)           // class_name_ length
-                + class_name_.size()    // class_name_ data
+                + serialized_length(class_name_) // class name string
                 ;
 
             msg.buf_ = std::make_unique<char[]>(msg.len_);
@@ -200,14 +199,13 @@ namespace unreal_debugger::serialization::events
             value_ = deserialize_string(buf);
         }
 
+        // Compute the serialized size of a watch
         int size() const
         {
             return sizeof(int)           // parent index
                 + sizeof(int)           // assigned index
-                + sizeof(int)           // name length
-                + name_.size()          // name data
-                + sizeof(int)           // value length
-                + value_.size()         // value data
+                + serialized_length(name_) // name string
+                + serialized_length(value_) // value string
                 ;
         }
 
@@ -343,8 +341,7 @@ namespace unreal_debugger::serialization::events
             message msg;
             msg.len_ =
                 sizeof(event_kind)      // kind field
-                + sizeof(int)           // class_name length
-                + class_name_.size()    // class_name data
+                + serialized_length(class_name_)    // class_name string
                 + sizeof(int)           // line_number
                 ;
 
@@ -384,8 +381,7 @@ namespace unreal_debugger::serialization::events
             message msg;
             msg.len_ =
                 sizeof(event_kind)      // kind field
-                + sizeof(int)           // class_name length
-                + class_name_.size()    // class_name data
+                + serialized_length(class_name_)    // class_name string
                 + sizeof(int)           // line_number
                 ;
 
@@ -423,8 +419,7 @@ namespace unreal_debugger::serialization::events
             message msg;
             msg.len_ =
                 sizeof(event_kind)      // kind field
-                + sizeof(int)           // class_name length
-                + class_name_.size()    // class_name data
+                + serialized_length(class_name_)    // class_name string
                 ;
 
             msg.buf_ = std::make_unique<char[]>(msg.len_);
@@ -499,8 +494,7 @@ namespace unreal_debugger::serialization::events
             message msg;
             msg.len_ =
                 sizeof(event_kind)      // kind field
-                + sizeof(int)           // text length
-                + text_.size()          // text data
+                + serialized_length(text_)          // text string
                 ;
 
             msg.buf_ = std::make_unique<char[]>(msg.len_);
@@ -554,8 +548,7 @@ namespace unreal_debugger::serialization::events
             message msg;
             msg.len_ =
                 sizeof(event_kind)      // kind field
-                + sizeof(int)           // entry length
-                + entry_.size()          // entry data
+                + serialized_length(entry_)  // entry string
                 ;
 
             msg.buf_ = std::make_unique<char[]>(msg.len_);
@@ -590,8 +583,7 @@ namespace unreal_debugger::serialization::events
             message msg;
             msg.len_ =
                 sizeof(event_kind)      // kind field
-                + sizeof(int)           // name length
-                + object_name_.size()          // name data
+                + serialized_length(object_name_)          // name string
                 ;
 
             msg.buf_ = std::make_unique<char[]>(msg.len_);

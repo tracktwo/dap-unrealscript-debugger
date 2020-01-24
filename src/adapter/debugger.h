@@ -5,24 +5,51 @@
 namespace unreal_debugger::client
 {
 
-class Debugger
+enum class watch_kind
+{
+    local,
+    global,
+    user
+};
+
+// Watch lists
+struct watch_data
+{
+    watch_data(const std::string& n, const std::string& t, const std::string& v, int p) :
+        name(n), type(t), value(v), parent(p)
+    {}
+
+    std::string name;
+    std::string type;
+    std::string value;
+    int parent;
+    std::vector<int> children;
+};
+
+using watch_list = std::vector<watch_data>;
+
+struct stack_frame
+{
+    stack_frame() = default;
+    stack_frame(const std::string& cls, const std::string& func) : class_name(cls), function_name(func)
+    {}
+
+    watch_list& get_watches(watch_kind kind);
+
+    std::string class_name = "";
+    int line_number = 0;
+    std::string function_name = "";
+    watch_list local_watches;
+    watch_list global_watches;
+    watch_list user_watches;
+    bool fetched_watches = false;
+};
+
+class debugger_state
 {
 public:
 
-    enum class WatchKind
-    {
-        Local,
-        Global,
-        User
-    };
-
-    Debugger()
-    {
-        // Ensure we always have one element in the call stack to represent the top-most frame.
-        callstack.resize(1);
-    }
-
-    enum class State
+    enum class state
     {
         normal,
         busy,
@@ -31,66 +58,40 @@ public:
         waiting_for_user_watches
     };
 
-    // Watch lists
-    struct WatchData
+    debugger_state()
     {
-        WatchData(const std::string& n, const std::string& t, const std::string& v, int p) :
-            name(n), type(t), value(v), parent(p)
-        {}
+        // Ensure we always have one element in the call stack to represent the top-most frame.
+        callstack_.resize(1);
+    }
 
-        std::string name;
-        std::string type;
-        std::string value;
-        int parent;
-        std::vector<int> children;
-    };
+    std::vector<stack_frame>& get_callstack() { return callstack_; }
+    stack_frame& get_stack_frame(int idx) { return callstack_[idx]; }
 
-    using WatchList = std::vector<WatchData>;
+    void clear_watch(watch_kind kind);
+    void add_watch(watch_kind kind, int index, int parent, const std::string& name, const std::string& value);
 
-    struct  StackFrame
-    {
-        StackFrame() = default;
-        StackFrame(const std::string& cls, const std::string& func) : class_name(cls), function_name(func)
-        {}
-
-        WatchList& get_watches(WatchKind kind);
-
-        std::string class_name = "";
-        int line_number = 0;
-        std::string function_name = "";
-        WatchList local_watches;
-        WatchList global_watches;
-        WatchList user_watches;
-        bool fetched_watches = false;
-    };
-
-
-    std::vector<StackFrame>& get_callstack() { return callstack; }
-    void clear_watch(WatchKind kind);
-    void add_watch(WatchKind kind, int index, int parent, const std::string& name, const std::string& value);
-
-    void lock_list(WatchKind kind);
-    void unlock_list(WatchKind kind);
+    void lock_list(watch_kind kind);
+    void unlock_list(watch_kind kind);
 
     void clear_callstack();
     void add_callstack(const std::string& name);
     int get_current_frame_index() const;
     void set_current_frame_index(int frame);
-    StackFrame& get_current_stack_frame();
+    stack_frame& get_current_stack_frame();
     void finalize_callstack();
-    void set_state(State s) { state = s; }
-    State get_state() const { return state; }
+    void set_state(state s) { state_ = s; }
+    state get_state() const { return state_; }
     int find_user_watch(int frame_index, const std::string& var_name) const;
 
 private:
 
-    std::vector<StackFrame> callstack;
-    int current_frame = 0;
-    std::atomic<State> state;
-    int watch_lock_depth = 0;
+    std::vector<stack_frame> callstack_;
+    int current_frame_ = 0;
+    std::atomic<state> state_;
+    int watch_lock_depth_ = 0;
 };
 
-extern Debugger debugger;
+extern debugger_state debugger;
 
 }
 

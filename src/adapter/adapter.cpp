@@ -42,26 +42,9 @@ namespace dap
         DAP_FIELD(sourceRoots, "sourceRoots"));
 }
 
-namespace unreal_debugger::client
+namespace unreal_debugger::adapter
 {
-
-LARGE_INTEGER last_time;
-LARGE_INTEGER freq;
-
-static void init_timer()
-{
-    QueryPerformanceFrequency(&freq);
-}
-static void log_timer(const char* msg)
-{
-    LARGE_INTEGER lint, elapsed;
-    QueryPerformanceCounter(&lint);
-    elapsed.QuadPart = lint.QuadPart - last_time.QuadPart;
-    elapsed.QuadPart *= 1'000'000;
-    elapsed.QuadPart /= freq.QuadPart;
-    dap::writef(log_file, "%s %lldus\n", msg, elapsed.QuadPart);
-    last_time = lint;
-}
+using namespace unreal_debugger::client;
 
 std::unique_ptr<dap::Session> session;
 std::unique_ptr<dap::net::Server> server;
@@ -125,7 +108,7 @@ namespace util
         hnd = CreateFile(path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
         if (hnd == INVALID_HANDLE_VALUE)
         {
-            dap::writef(log_file, "normalize_path: Could not open file (error %d\n)", GetLastError());
+            log("normalize_path: Could not open file (error %d\n)", GetLastError());
             return path;
         }
 
@@ -183,7 +166,7 @@ namespace util
                 return normalized;
             }
         }
-        dap::writef(log_file, "Error: Cannot find source path for %s\n", class_name.c_str());
+        log("Error: Cannot find source path for %s\n", class_name.c_str());
         return class_name;
     }
 
@@ -207,7 +190,7 @@ namespace util
     //             because the value 0 is special to DAP and so we cannot use it to represent the 0th local variable of the 0th stack frame.
     //             Instead simply shift all variable indices to be 1-indexed instead of 0-indexed. This wastes 1 potential variable slot per
     //             frame when we really only need to special case the first frame, but a million variables is a whole lot anyway.
-    int encode_variable_reference(int frame_index, int variable_index, Debugger::WatchKind kind)
+    int encode_variable_reference(int frame_index, int variable_index, watch_kind kind)
     {
         constexpr int max_frame = 1 << 9;
         constexpr int max_var = (1 << 20) - 1;
@@ -235,13 +218,13 @@ namespace util
         // Add the user/global bits
         switch (kind)
         {
-        case Debugger::WatchKind::Local:
+        case watch_kind::local:
             // Nothing to do for locals
             break;
-        case Debugger::WatchKind::Global:
+        case watch_kind::global:
             encoding |= variable_encoding_global_bit;
             break;
-        case Debugger::WatchKind::User:
+        case watch_kind::user:
             encoding |= variable_encoding_user_bit;
 
         }
@@ -249,25 +232,25 @@ namespace util
         return encoding;
     }
 
-    Debugger::WatchKind decode_watch_kind(int variable_reference)
+    watch_kind decode_watch_kind(int variable_reference)
     {
         if (variable_reference & variable_encoding_user_bit)
-            return Debugger::WatchKind::User;
+            return watch_kind::user;
 
         if (variable_reference & variable_encoding_global_bit)
-            return Debugger::WatchKind::Global;
+            return watch_kind::global;
 
-        return Debugger::WatchKind::Local;
+        return watch_kind::local;
     }
 
-    std::tuple<int, int, Debugger::WatchKind> decode_variable_reference(int variable_reference)
+    std::tuple<int, int, watch_kind> decode_variable_reference(int variable_reference)
     {
         // The mask to apply to isolate the variable index: shift 1 by the frame shift amount and subtract 1 to set all bits below
         // the first bit of the frame.
         constexpr int variable_mask = (1 << variable_encoding_frame_shift) - 1;
 
         // Record and then unset the global or user watch flag.
-        Debugger::WatchKind kind = decode_watch_kind(variable_reference);
+        watch_kind kind = decode_watch_kind(variable_reference);
         variable_reference &= ~(variable_encoding_global_bit | variable_encoding_user_bit);
 
         // Extract the variable portion.
@@ -303,11 +286,8 @@ namespace handlers
 {
     void error_handler(const char* msg)
     {
-        if (log_enabled)
-        {
-            dap::writef(log_file, "Session error: %s\n", msg);
-            stop_debugger();
-        }
+        log("Session error: %s\n", msg);
+        stop_debugger();
     }
 
     // Handle an initialize request. This returns debugger capabilities.
@@ -408,7 +388,6 @@ namespace handlers
     // Handle a stack trace request.
     dap::ResponseOrError<dap::StackTraceResponse> stack_trace_handler(const dap::StackTraceRequest& request)
     {
-        log_timer("stack trace start");
         if (request.threadId != unreal_thread_id)
         {
             int id = request.threadId;
@@ -418,7 +397,7 @@ namespace handlers
         int count = 0;
         dap::StackTraceResponse response;
 
-        if (debugger.get_state() == Debugger::State::busy)
+        if (debugger.get_state() == debugger_state::state::busy)
         {
             signals::breakpoint_hit.wait();
         }
@@ -429,16 +408,16 @@ namespace handlers
         bool disabled_watch_info = false;
 
         // Loop over frames requested by the client. The request may start at a frame > 0, and may not request all frames.
-        for (int frame_index = *request.startFrame; frame_index < debugger.get_callstack().size(); ++frame_index)
+        for (int frame_index = *request.startFrame; frame_index < client::debugger.get_callstack().size(); ++frame_index)
         {
             dap::StackFrame dap_frame;
-            Debugger::StackFrame& debugger_frame = debugger.get_callstack()[frame_index];
+            stack_frame& debugger_frame = debugger.get_callstack()[frame_index];
 
             if (debugger_frame.line_number == 0)
             {
                 // We have not yet fetched this frame's line number. Request it now.
                 debugger.set_current_frame_index(frame_index);
-                debugger.set_state(Debugger::State::waiting_for_frame_line);
+                debugger.set_state(debugger_state::state::waiting_for_frame_line);
 
                 // Tell the debugger interface not to bother sending watch info: we only want line numbers
                 // when swapping frames to build a call stack.
@@ -452,7 +431,7 @@ namespace handlers
                 change_stack(frame_index);
                 signals::line_received.wait();
                 signals::line_received.reset();
-                debugger.set_state(Debugger::State::normal);
+                debugger.set_state(debugger_state::state::normal);
             }
 
             dap_frame.id = frame_index;
@@ -479,10 +458,10 @@ namespace handlers
         {
             debugger.set_current_frame_index(previous_frame);
             change_stack(previous_frame);
-            debugger.set_state(Debugger::State::waiting_for_frame_line);
+            debugger.set_state(debugger_state::state::waiting_for_frame_line);
             signals::line_received.wait();
             signals::line_received.reset();
-            debugger.set_state(Debugger::State::normal);
+            debugger.set_state(debugger_state::state::normal);
         }
 
         // If we asked the debugger to stop sending watch info, turn it back on now
@@ -491,8 +470,7 @@ namespace handlers
             toggle_watch_info(true);
         }
 
-        response.totalFrames = debugger.get_callstack().size();
-        log_timer("stack trace end");
+        response.totalFrames = static_cast<int>(debugger.get_callstack().size());
 
         return response;
     }
@@ -500,10 +478,7 @@ namespace handlers
     // Handle a request for scope information
     dap::ResponseOrError<dap::ScopesResponse> scopes_handler(const dap::ScopesRequest& request)
     {
-
-        log_timer("scopes start");
-
-        if (debugger.get_state() == Debugger::State::busy)
+        if (debugger.get_state() == debugger_state::state::busy)
         {
             signals::breakpoint_hit.wait();
         }
@@ -511,23 +486,22 @@ namespace handlers
         dap::Scope scope;
         scope.name = "Locals";
         scope.presentationHint = "locals";
-        scope.variablesReference = util::encode_variable_reference(request.frameId, 0, Debugger::WatchKind::Local);
+        scope.variablesReference = util::encode_variable_reference(request.frameId, 0, watch_kind::local);
         if (debugger.get_callstack()[request.frameId].fetched_watches)
         {
-            scope.namedVariables = debugger.get_callstack()[request.frameId].local_watches[0].children.size();
+            scope.namedVariables = static_cast<int>(debugger.get_callstack()[request.frameId].local_watches[0].children.size());
         }
         dap::ScopesResponse response;
         response.scopes.push_back(scope);
 
         scope.name = "Globals";
         scope.presentationHint = {};
-        scope.variablesReference = util::encode_variable_reference(request.frameId, 0, Debugger::WatchKind::Global);
+        scope.variablesReference = util::encode_variable_reference(request.frameId, 0, watch_kind::global);
         if (debugger.get_callstack()[request.frameId].fetched_watches)
         {
-            scope.namedVariables = debugger.get_callstack()[request.frameId].global_watches[0].children.size();
+            scope.namedVariables = static_cast<int>(debugger.get_callstack()[request.frameId].global_watches[0].children.size());
         }
         response.scopes.push_back(scope);
-        log_timer("scopes end");
         return response;
     }
 
@@ -535,13 +509,13 @@ namespace handlers
     {
         int saved_frame_index = debugger.get_current_frame_index();
         debugger.set_current_frame_index(frame_index);
-        debugger.set_state(Debugger::State::waiting_for_frame_watches);
+        debugger.set_state(debugger_state::state::waiting_for_frame_watches);
 
         // Request a stack change and wait for the watches to to be received.
         change_stack(frame_index);
         signals::watches_received.wait();
         signals::watches_received.reset();
-        debugger.set_state(Debugger::State::normal);
+        debugger.set_state(debugger_state::state::normal);
 
         if (debugger.get_current_frame_index() != saved_frame_index)
         {
@@ -550,12 +524,12 @@ namespace handlers
             // frmae), so turn it off.
             debugger.set_current_frame_index(saved_frame_index);
             toggle_watch_info(false);
-            debugger.set_state(Debugger::State::waiting_for_frame_line);
+            debugger.set_state(debugger_state::state::waiting_for_frame_line);
             change_stack(saved_frame_index);
             signals::line_received.wait();
             signals::line_received.reset();
             toggle_watch_info(true);
-            debugger.set_state(Debugger::State::normal);
+            debugger.set_state(debugger_state::state::normal);
         }
 
         debugger.get_callstack()[frame_index].fetched_watches = true;
@@ -563,9 +537,7 @@ namespace handlers
 
     dap::ResponseOrError<dap::VariablesResponse> variables_handler(const dap::VariablesRequest& request)
     {
-        log_timer("variables start");
-
-        if (debugger.get_state() == Debugger::State::busy)
+        if (debugger.get_state() == debugger_state::state::busy)
         {
             signals::breakpoint_hit.wait();
         }
@@ -578,12 +550,12 @@ namespace handlers
             fetch_watches(frame_index);
         }
 
-        const Debugger::WatchList& watch_list = debugger.get_callstack()[frame_index].get_watches(watch_kind);
+        const watch_list& watch_list = debugger.get_callstack()[frame_index].get_watches(watch_kind);
 
         if (request.start.value(0) != 0 || request.count.value(0) != 0)
         {
             // TODO Implement chunked responses.
-            return dap::Error("Debugger does not support chunked variable requests");
+            return dap::Error("debugger_state does not support chunked variable requests");
         }
 
         dap::VariablesResponse response;
@@ -591,11 +563,11 @@ namespace handlers
         // The watch list can be empty, e.g. local watches for a function with no parameters and no local variables.
         if (!watch_list.empty())
         {
-            const Debugger::WatchData& parent = watch_list[variable_index];
+            const watch_data& parent = watch_list[variable_index];
 
             for (int child_index : parent.children)
             {
-                const Debugger::WatchData& watch = watch_list[child_index];
+                const watch_data& watch = watch_list[child_index];
                 dap::Variable var;
                 var.name = watch.name;
                 var.type = watch.type;
@@ -614,27 +586,26 @@ namespace handlers
                 {
                     int child_reference = util::encode_variable_reference(frame_index, child_index, watch_kind);
                     var.variablesReference = watch.children.empty() ? 0 : child_reference;
-                    var.namedVariables = watch.children.size();
+                    var.namedVariables = static_cast<int>(watch.children.size());
                     var.indexedVariables = 0;
                 }
                 response.variables.push_back(var);
             }
         }
 
-        log_timer("variables end");
         return response;
     }
 
     static dap::EvaluateResponse make_user_watch_response(int frame_index, int index)
     {
         dap::EvaluateResponse response;
-        const Debugger::WatchData& watch = debugger.get_callstack()[frame_index].user_watches[index];
+        const watch_data& watch = debugger.get_stack_frame(frame_index).user_watches[index];
         response.type = watch.type;
         response.result = watch.value;
         if (!watch.children.empty())
         {
-            response.variablesReference = util::encode_variable_reference(0, index, Debugger::WatchKind::User);
-            response.namedVariables = watch.children.size();
+            response.variablesReference = util::encode_variable_reference(0, index, watch_kind::user);
+            response.namedVariables = static_cast<int>(watch.children.size());
         }
         return response;
     }
@@ -656,7 +627,7 @@ namespace handlers
             fetch_watches(frame_index);
         }
 
-        Debugger::WatchList& user_watches = debugger.get_callstack()[frame_index].user_watches;
+        watch_list& user_watches = debugger.get_stack_frame(frame_index).user_watches;
 
         // If we have existing watches try to find it in the list first. It will be a child
             // of the root node if so, we don't need to search arbitrary children throughout the list.
@@ -666,11 +637,11 @@ namespace handlers
         }
 
         // If we've failed to find this watch then we need to request it.
-        debugger.set_state(Debugger::State::waiting_for_user_watches);
+        debugger.set_state(debugger_state::state::waiting_for_user_watches);
         add_watch(request.expression);
         signals::user_watches_received.wait();
         signals::user_watches_received.reset();
-        debugger.set_state(Debugger::State::normal);
+        debugger.set_state(debugger_state::state::normal);
 
         // Now find the watch.
         if (int index = debugger.find_user_watch(frame_index, request.expression); index >= 0)
@@ -695,7 +666,7 @@ namespace handlers
 
     dap::ContinueResponse continue_handler(const dap::ContinueRequest& request)
     {
-        while (debugger.get_state() != Debugger::State::normal)
+        while (debugger.get_state() != debugger_state::state::normal)
             ;
 
         toggle_watch_info(true);
@@ -704,7 +675,7 @@ namespace handlers
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.
         debugger.set_current_frame_index(0);
-        debugger.set_state(Debugger::State::busy);
+        debugger.set_state(debugger_state::state::busy);
         signals::breakpoint_hit.reset();
         go();
         return {};
@@ -712,26 +683,24 @@ namespace handlers
 
     dap::NextResponse next_handler(const dap::NextRequest& request)
     {
-        while (debugger.get_state() != Debugger::State::normal)
+        while (debugger.get_state() != debugger_state::state::normal)
             ;
 
         toggle_watch_info(true);
         clear_watch();
 
-        log_timer("next start");
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.
         debugger.set_current_frame_index(0);
-        debugger.set_state(Debugger::State::busy);
+        debugger.set_state(debugger_state::state::busy);
         signals::breakpoint_hit.reset();
         step_over();
-        log_timer("next end");
         return {};
     }
 
     dap::StepInResponse step_in_handler(const dap::StepInRequest& request)
     {
-        while (debugger.get_state() != Debugger::State::normal)
+        while (debugger.get_state() != debugger_state::state::normal)
             ;
 
         toggle_watch_info(true);
@@ -740,7 +709,7 @@ namespace handlers
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.
         debugger.set_current_frame_index(0);
-        debugger.set_state(Debugger::State::busy);
+        debugger.set_state(debugger_state::state::busy);
         signals::breakpoint_hit.reset();
         client::step_into();
         return {};
@@ -748,7 +717,7 @@ namespace handlers
 
     dap::StepOutResponse step_out_handler(const dap::StepOutRequest& request)
     {
-        while (debugger.get_state() != Debugger::State::normal)
+        while (debugger.get_state() != debugger_state::state::normal)
             ;
 
         client::toggle_watch_info(true);
@@ -757,7 +726,7 @@ namespace handlers
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.
         debugger.set_current_frame_index(0);
-        debugger.set_state(Debugger::State::busy);
+        debugger.set_state(debugger_state::state::busy);
         signals::breakpoint_hit.reset();
         client::step_outof();
         return {};
@@ -775,12 +744,11 @@ namespace sent_handlers
 // Tell the debug client that the debugger is stopped at a breakpoint.
 void breakpoint_hit()
 {
-    log_timer("breakpoint start");
     if (!session)
         return;
 
-    if (debugger.get_state() == Debugger::State::busy)
-        debugger.set_state(Debugger::State::normal);
+    if (debugger.get_state() == debugger_state::state::busy)
+        debugger.set_state(debugger_state::state::normal);
 
     signals::breakpoint_hit.fire();
 
@@ -788,7 +756,6 @@ void breakpoint_hit()
     ev.reason = "breakpoint";
     ev.threadId = unreal_thread_id;
     session->send(ev);
-    log_timer("breakpoint end");
 }
 
 // Tell the debug client that the debugger has produced some log output.
@@ -816,13 +783,7 @@ void debugger_terminated()
 
 void create_adapter()
 {
-    init_timer();
     session = dap::Session::create();
-
-    // The adapter will communicate over stdin/stdout with the debug client in the editor.
-
-
-  //  session->bind(dap::file(stdin, false), dap::file(stdout, false));
 
     // Bind handlers.
     session->onError(&handlers::error_handler);
@@ -848,8 +809,6 @@ void create_adapter()
 void on_connect(const std::shared_ptr<dap::ReaderWriter>& streams)
 {
     create_adapter();
-  //  auto spy = dap::spy(static_cast<std::shared_ptr<dap::Reader>>(streams), log_file);
-   // session->bind(spy, static_cast<std::shared_ptr<dap::Writer>>(streams));
     session->bind(streams);
 }
 
@@ -867,7 +826,7 @@ void start_adapter()
         std::shared_ptr<dap::Reader> in = dap::file(stdin, false);
         std::shared_ptr<dap::Writer> out = dap::file(stdout, false);
         session->bind(in, out);
-        dap::writef(log_file, "Bound to in/out\n");
+        log("Bound to in/out\n");
     }
 }
 

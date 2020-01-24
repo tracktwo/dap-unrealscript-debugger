@@ -15,7 +15,7 @@ void show_dll_form(const events::show_dll_form& ev)
  
     debugger.finalize_callstack();
     // Tell the debugger we've hit a breakpoint.
-    breakpoint_hit();
+    adapter::breakpoint_hit();
 }
 
 void build_hierarchy(const events::build_hierarchy& ev)
@@ -32,22 +32,22 @@ void add_class_to_hierarchy(const events::add_class_to_hierarchy& ev)
 
 void clear_a_watch(const events::clear_a_watch& ev)
 {
-    debugger.clear_watch(static_cast<Debugger::WatchKind>(ev.watch_type_));
+    debugger.clear_watch(static_cast<watch_kind>(ev.watch_type_));
 }
 
 void lock_list(const events::lock_list& ev)
 {
-    debugger.lock_list(static_cast<Debugger::WatchKind>(ev.watch_type_));
+    debugger.lock_list(static_cast<watch_kind>(ev.watch_type_));
 }
 
 void unlock_list(const events::unlock_list& ev)
 {
     for (const events::watch& w : ev.watch_info_)
     {
-        debugger.add_watch(static_cast<Debugger::WatchKind>(ev.watch_type_), w.assigned_index_, w.parent_index_, w.name_, w.value_);
+        debugger.add_watch(static_cast<watch_kind>(ev.watch_type_), w.assigned_index_, w.parent_index_, w.name_, w.value_);
     }
 
-    debugger.unlock_list(static_cast<Debugger::WatchKind>(ev.watch_type_));
+    debugger.unlock_list(static_cast<watch_kind>(ev.watch_type_));
 }
 
 void add_breakpoint(const events::add_breakpoint& ev)
@@ -70,7 +70,7 @@ void editor_goto_line(const events::editor_goto_line& ev)
 
 void add_line_to_log(const events::add_line_to_log& ev)
 {
-    console_message(ev.text_);
+    adapter::console_message(ev.text_);
 }
 
 void call_stack_clear(const events::call_stack_clear& ev)
@@ -88,7 +88,7 @@ void set_current_object_name(const events::set_current_object_name& ev)
     // When changing frames for the purposes of fetching line info for the call stack 'current object name'
     // is the last event we will receive from Unreal, so we can use this to signal that the change is complete.
     // This is because we've disabled watch info for this change.
-    if (debugger.get_state() == Debugger::State::waiting_for_frame_line)
+    if (debugger.get_state() == debugger_state::state::waiting_for_frame_line)
     {
         signals::line_received.fire();
     }
@@ -98,7 +98,7 @@ void set_current_object_name(const events::set_current_object_name& ev)
 // a better place.
 void terminated(const events::terminated& ev)
 {
-    debugger_terminated();
+    adapter::debugger_terminated();
 }
 
 void dispatch_event(const serialization::message& msg)
