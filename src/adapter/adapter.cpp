@@ -32,13 +32,30 @@ namespace dap
         optional<array<string>> sourceRoots;
     };
 
+    struct UnrealAttachRequest : AttachRequest
+    {
+        using Response = AttachResponse;
+
+        UnrealAttachRequest() = default;
+        ~UnrealAttachRequest() = default;
+
+        // A vector of strings for the list of source roots.
+        optional<array<string>> sourceRoots;
+    };
+
 
     DAP_DECLARE_STRUCT_TYPEINFO(UnrealLaunchRequest);
+    DAP_DECLARE_STRUCT_TYPEINFO(UnrealAttachRequest);
 
     DAP_IMPLEMENT_STRUCT_TYPEINFO(UnrealLaunchRequest,
         "launch",
         DAP_FIELD(restart, "__restart"),
         DAP_FIELD(noDebug, "noDebug"),
+        DAP_FIELD(sourceRoots, "sourceRoots"));
+
+    DAP_IMPLEMENT_STRUCT_TYPEINFO(UnrealAttachRequest,
+        "attach",
+        DAP_FIELD(restart, "__restart"),
         DAP_FIELD(sourceRoots, "sourceRoots"));
 }
 
@@ -298,8 +315,7 @@ namespace handlers
         return response;
     }
 
-    // Handle a 'launch' request. There isn't really anything to do here
-    // since the debugger can't actually 'launch' anything.
+    // Handle a 'launch' request.
     dap::ResponseOrError<dap::LaunchResponse> launch_handler(const dap::UnrealLaunchRequest& req)
     {
         if (req.sourceRoots)
@@ -322,11 +338,27 @@ namespace handlers
         return dap::LaunchResponse{};
     }
 
-    // Handle an 'attach' request. This should be implemented.
-    // TODO How to get args like the port number?
-    dap::AttachResponse attach_handler(const dap::AttachRequest& req)
+    // Handle an 'attach' request.
+    dap::ResponseOrError<dap::AttachResponse> attach_handler(const dap::UnrealAttachRequest& req)
     {
-        return {};
+        if (req.sourceRoots)
+        {
+            auto bad_roots = util::init_source_roots(*req.sourceRoots);
+            if (!bad_roots.empty())
+            {
+                std::stringstream msg;
+                msg << "Error: Bad source roots:" << std::endl;
+                for (const auto& r : bad_roots)
+                {
+                    msg << r << std::endl;
+                }
+
+                dap::Error err;
+                err.message = msg.str();
+                return err;
+            }
+        }
+        return dap::AttachResponse{};
     }
 
     dap::DisconnectResponse disconnect(const dap::DisconnectRequest& request)
@@ -383,6 +415,27 @@ namespace handlers
         thread.name = "UnrealScript";
         response.threads.push_back(thread);
         return response;
+    }
+
+    // Change the debugger frame, blocking until the frame has changed. Optionally requests watch info for the new frame.
+    void change_frame_and_wait(int frame, bool with_watches)
+    {
+        debugger.set_current_frame_index(frame);
+        change_stack(frame);
+        if (with_watches)
+        {
+            debugger.set_state(debugger_state::state::waiting_for_frame_watches);
+            signals::watches_received.wait();
+            signals::watches_received.reset();
+        }
+        else
+        {
+            debugger.set_state(debugger_state::state::waiting_for_frame_line);
+            signals::line_received.wait();
+            signals::line_received.reset();
+        }
+
+        debugger.set_state(debugger_state::state::normal);
     }
 
     // Handle a stack trace request.
@@ -456,12 +509,7 @@ namespace handlers
         // Restore the frame index to our original value.
         if (previous_frame != debugger.get_current_frame_index())
         {
-            debugger.set_current_frame_index(previous_frame);
-            change_stack(previous_frame);
-            debugger.set_state(debugger_state::state::waiting_for_frame_line);
-            signals::line_received.wait();
-            signals::line_received.reset();
-            debugger.set_state(debugger_state::state::normal);
+            change_frame_and_wait(previous_frame, false);
         }
 
         // If we asked the debugger to stop sending watch info, turn it back on now
@@ -508,29 +556,15 @@ namespace handlers
     void fetch_watches(int frame_index)
     {
         int saved_frame_index = debugger.get_current_frame_index();
-        debugger.set_current_frame_index(frame_index);
-        debugger.set_state(debugger_state::state::waiting_for_frame_watches);
-
-        // Request a stack change and wait for the watches to to be received.
-        change_stack(frame_index);
-        signals::watches_received.wait();
-        signals::watches_received.reset();
+        change_frame_and_wait(frame_index, true);
         debugger.get_current_stack_frame().fetched_watches = true;
-        debugger.set_state(debugger_state::state::normal);
 
         if (debugger.get_current_frame_index() != saved_frame_index)
         {
             // Reset the debugger's internal state to the original callstack.
             // We don't need var information for this (we already have the previous
-            // frmae), so turn it off.
-            debugger.set_current_frame_index(saved_frame_index);
-            toggle_watch_info(false);
-            debugger.set_state(debugger_state::state::waiting_for_frame_line);
-            change_stack(saved_frame_index);
-            signals::line_received.wait();
-            signals::line_received.reset();
-            toggle_watch_info(true);
-            debugger.set_state(debugger_state::state::normal);
+            // frame), so turn it off.
+            change_frame_and_wait(saved_frame_index, false);
         }
     }
 
@@ -611,7 +645,6 @@ namespace handlers
 
     dap::EvaluateResponse evaluate_handler(const dap::EvaluateRequest& request)
     {
-
         if (request.context && *request.context != "watch")
         {
             dap::EvaluateResponse response;
@@ -629,7 +662,7 @@ namespace handlers
         const watch_list& user_watches = debugger.get_stack_frame(frame_index).user_watches;
 
         // If we have existing watches try to find it in the list first. It will be a child
-            // of the root node if so, we don't need to search arbitrary children throughout the list.
+        // of the root node if so, we don't need to search arbitrary children throughout the list.
         if (int index = debugger.find_user_watch(frame_index, request.expression); index >= 0)
         {
             return make_user_watch_response(frame_index, index);
@@ -788,6 +821,7 @@ void create_adapter()
     session->onError(&handlers::error_handler);
     session->registerHandler(&handlers::initialize_handler);
     session->registerHandler(&handlers::launch_handler);
+    session->registerHandler(&handlers::attach_handler);
     session->registerHandler(&handlers::set_breakpoints_handler);
     session->registerHandler(&handlers::set_exception_breakpoints_handler);
     session->registerHandler(&handlers::threads_handler);

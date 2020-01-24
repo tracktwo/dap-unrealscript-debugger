@@ -161,9 +161,9 @@ int main(int argc, char *argv[])
 
     // Currently only accepts 1 command line option: -debug <port>
 
-    for (int i = 1; i < argc; ++i)
+    if (argc == 3)
     {
-        if (strcmp(argv[i], "-debug") == 0 && ((i+1) < argc))
+        if (strcmp(argv[1], "-debug") == 0)
         {
             client::debug_port = atoi(argv[2]);
         }
