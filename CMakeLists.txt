@@ -92,6 +92,12 @@ add_custom_command(TARGET DebuggerAdapter POST_BUILD
      "${CMAKE_CURRENT_SOURCE_DIR}/extensions/visual_studio/UnrealScriptDebuggerAdapter/adapter/DebuggerAdapter.exe" 
   COMMENT "Copying to VS adapter directory")
 
+  add_custom_command(TARGET DebuggerAdapter POST_BUILD 
+  COMMAND "${CMAKE_COMMAND}" -E copy 
+     "$<TARGET_FILE:DebuggerAdapter>"
+     "${CMAKE_CURRENT_SOURCE_DIR}/extensions/vscode/DebuggerAdapter.exe" 
+  COMMENT "Copying to VS Code extension directory")
+
 if (DebuggerAdapter_INSTALL)
     install(TARGETS DebuggerAdapter RUNTIME DESTINATION "${DebuggerAdapter_INSTALL_BINDIR}")
 endif (DebuggerAdapter_INSTALL)
