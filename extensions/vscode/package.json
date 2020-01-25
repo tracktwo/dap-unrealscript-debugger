@@ -1,0 +1,46 @@
+{
+    "name": "unrealscript-debugger",
+    "displayName": "unrealscript debugger",
+    "description": "Debugger for UnrealScript",
+    "version": "0.1.0",
+    "preview": true,
+    "publisher": "X2 Community Project",
+    "author": {
+        "name": "X2 Community Project"
+    },
+    "license": "MIT",
+    "engines": {
+        "vscode": "^1.32.0"
+    },
+    "categories": [
+        "Debuggers"
+    ],
+
+    "contributes": {
+        "debuggers": [
+            {
+                "type": "unrealscript",
+                "program": "DebuggerAdapter.exe",
+                "label": "Unrealscript debug",
+                "languages": [ "unrealscript", "uc" ],
+
+                "configurationAttributes": {
+                    "attach": {
+                        "required": [ "sourceRoots" ],
+                        "properties": {
+                            "sourceRoots": {
+                                "type": "array",
+                                "description": "paths to source files to pass to the debug adapter"
+                            }
+                        }
+                    }
+                }
+            }
+        ],
+        "breakpoints": [
+            {
+                "language": "unrealscript"
+            }
+        ]
+    }
+}
