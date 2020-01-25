@@ -825,15 +825,15 @@ void console_message(const std::string& msg)
     session->send(ev);
 }
 
-// The debugger has stopped. Send a terminated event to the client, and begin
-// our shutdown process.
+// The debugger has stopped. Send a terminated event to the client. It should respond
+// with a disconnect.
 void debugger_terminated()
 {
     if (!session)
         return;
     dap::TerminatedEvent ev;
     session->send(ev);
-    stop_debugger();
+   // stop_debugger();
 }
 
 void create_adapter()
