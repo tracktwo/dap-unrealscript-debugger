@@ -85,6 +85,13 @@ target_compile_options(DebuggerAdapter PRIVATE "-permissive-" "-W3")
 target_compile_definitions(DebuggerAdapter PRIVATE "_WIN32_WINNT=0x0601")
 target_link_libraries(DebuggerAdapter PRIVATE cppdap)
 
+# Copy the debug adapter build to the VS installer project.
+add_custom_command(TARGET DebuggerAdapter POST_BUILD 
+  COMMAND "${CMAKE_COMMAND}" -E copy 
+     "$<TARGET_FILE:DebuggerAdapter>"
+     "${CMAKE_CURRENT_SOURCE_DIR}/extensions/visual_studio/UnrealScriptDebuggerAdapter/adapter/DebuggerAdapter.exe" 
+  COMMENT "Copying to VS adapter directory")
+
 if (DebuggerAdapter_INSTALL)
     install(TARGETS DebuggerAdapter RUNTIME DESTINATION "${DebuggerAdapter_INSTALL_BINDIR}")
 endif (DebuggerAdapter_INSTALL)
