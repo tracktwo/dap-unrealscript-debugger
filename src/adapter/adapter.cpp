@@ -389,7 +389,8 @@ namespace handlers
         for (size_t i = 0; i < breakpoints.size(); i++)
         {
 
-            // TODO add the breakpint to the debugger state.
+            // TODO add the breakpint to the debugger state. This is needed to properly handle
+            // removal of breakpoints.
             add_breakpoint(class_name, breakpoints[i].line);
             // We have no real way to know if the breakpoint addition worked, so just say it's good.
             response.breakpoints[i].verified = true;
