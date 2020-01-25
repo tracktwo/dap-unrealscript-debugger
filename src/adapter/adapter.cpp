@@ -312,6 +312,7 @@ namespace handlers
     {
         dap::InitializeResponse response;
         response.supportsDelayedStackTraceLoading = true;
+        response.supportsValueFormattingOptions = true;
         return response;
     }
 
@@ -392,6 +393,7 @@ namespace handlers
             add_breakpoint(class_name, breakpoints[i].line);
             // We have no real way to know if the breakpoint addition worked, so just say it's good.
             response.breakpoints[i].verified = true;
+            response.breakpoints[i].line = breakpoints[i].line;
         }
 
         return response;
@@ -496,7 +498,27 @@ namespace handlers
 
             dap_frame.source = source;
             dap_frame.column = 0;
-            dap_frame.name = debugger_frame.function_name;
+            if (request.format)
+            {
+                std::string format_str;
+                if (request.format->includeAll || request.format->module)
+                {
+                    format_str += debugger_frame.class_name;
+                    format_str += ".";
+                }
+                format_str += debugger_frame.function_name;
+
+                if (request.format->includeAll || request.format->line)
+                {
+                    format_str += " Line ";
+                    format_str += std::to_string(debugger_frame.line_number);
+                }
+                dap_frame.name = format_str;
+            }
+            else
+            {
+                dap_frame.name = debugger_frame.function_name;
+            }
             response.stackFrames.push_back(dap_frame);
 
             // If we have reached the number of frames requested by the client we can stop.

@@ -57,6 +57,7 @@ const watch_list& stack_frame::get_watches(watch_kind kind) const
 void debugger_state::clear_watch(watch_kind kind)
 {
     callstack_[current_frame_].get_watches(kind).clear();
+    callstack_[current_frame_].get_watches(kind).emplace_back("ROOT", "N/A", "N/A", -1);
 }
 
 void debugger_state::add_watch(watch_kind kind, int index, int parent, const std::string& full_name, const std::string& value)
