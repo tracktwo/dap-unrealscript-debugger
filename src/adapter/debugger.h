@@ -1,6 +1,7 @@
 
 #include <string>
 #include <vector>
+#include <map>
 
 namespace unreal_debugger::client
 {
@@ -56,7 +57,8 @@ public:
         busy,
         waiting_for_frame_line,
         waiting_for_frame_watches,
-        waiting_for_user_watches
+        waiting_for_user_watches,
+        waiting_for_add_breakpoint
     };
 
     debugger_state()
@@ -66,6 +68,7 @@ public:
     }
 
     void clear_watch(watch_kind kind);
+    void reserve_watch_size(watch_kind kind, std::size_t size);
     void add_watch(watch_kind kind, int index, int parent, const std::string& name, const std::string& value);
 
     void lock_list(watch_kind kind);
@@ -80,6 +83,9 @@ public:
     const stack_frame& get_stack_frame(int idx) const { return callstack_[idx]; }
     size_t callstack_size() const { return callstack_.size(); }
 
+    void add_breakpoint(const std::string& class_name, int line);
+    const std::vector<int>* get_breakpoints(const std::string& class_name) const;
+
     void finalize_callstack();
     void set_state(state s) { state_ = s; }
     state get_state() const { return state_; }
@@ -91,6 +97,11 @@ private:
     int current_frame_ = 0;
     std::atomic<state> state_;
     int watch_lock_depth_ = 0;
+
+    // A map from class name to a list of line numbers representing the breakpoints in this file.
+    // Note that unreal provides breakpoint info with the class names in all uppercase, so this map
+    // always contains upcased strings.
+    std::map<std::string, std::vector<int>> breakpoints_;
 };
 
 extern debugger_state debugger;

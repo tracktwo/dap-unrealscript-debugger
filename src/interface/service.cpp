@@ -160,7 +160,7 @@ void debugger_service::send_next_message()
         }
         if (n != 4)
         {
-            fatal_error("Sending event header truncated: wrote %z of 4 bytes\n", n);
+            fatal_error("Sending event header truncated: wrote %zu of 4 bytes\n", n);
             return;
         }
 
@@ -176,7 +176,7 @@ void debugger_service::send_next_message()
             }
             if (n != len)
             {
-                fatal_error("Sending event body truncated: wrote %z of %z bytes\n", n, len);
+                fatal_error("Sending event body truncated: wrote %zu of %zu bytes\n", n, len);
                 return;
             }
 

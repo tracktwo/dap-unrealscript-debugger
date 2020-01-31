@@ -42,16 +42,25 @@ void lock_list(const events::lock_list& ev)
 
 void unlock_list(const events::unlock_list& ev)
 {
-    for (const events::watch& w : ev.watch_info_)
+    watch_kind kind = static_cast<watch_kind>(ev.watch_type_);
+
+    debugger.reserve_watch_size(kind, ev.watch_info_.size());
+
+    for (auto&& w : ev.watch_info_)
     {
-        debugger.add_watch(static_cast<watch_kind>(ev.watch_type_), w.assigned_index_, w.parent_index_, w.name_, w.value_);
+        debugger.add_watch(kind, w.assigned_index_, w.parent_index_, w.name_, w.value_);
     }
 
-    debugger.unlock_list(static_cast<watch_kind>(ev.watch_type_));
+    debugger.unlock_list(kind);
 }
 
 void add_breakpoint(const events::add_breakpoint& ev)
 {
+    debugger.add_breakpoint(ev.class_name_, ev.line_number_);
+    if (debugger.get_state() == debugger_state::state::waiting_for_add_breakpoint)
+    {
+        signals::breakpoint_added.fire();
+    }
 }
 
 void remove_breakpoint(const events::remove_breakpoint& ev)

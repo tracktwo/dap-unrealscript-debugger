@@ -147,9 +147,9 @@ void debugger_service::toggle_watch_info(const commands::toggle_watch_info& cmd)
     // pending in the unlock list.
     if (!send_watch_info_)
     {
-        pending_unlocks_[0].reset();
-        pending_unlocks_[1].reset();
-        pending_unlocks_[2].reset();
+        pending_unlocks_[0]->watch_info_.clear();
+        pending_unlocks_[1]->watch_info_.clear();
+        pending_unlocks_[2]->watch_info_.clear();
     }
 }
 

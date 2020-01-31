@@ -24,6 +24,7 @@ boost::asio::io_context ios;
 std::unique_ptr<tcp::socket> sock;
 serialization::locked_message_queue send_queue;
 serialization::message next_event;
+size_t max_event_size = 0;
 std::vector<fs::path> source_roots;
 int debug_port;
 debugger_state debugger;
@@ -35,6 +36,7 @@ namespace signals {
     signal watches_received;
     signal breakpoint_hit;
     signal user_watches_received;
+    signal breakpoint_added;
 }
 
 // Schedule an async receive of the next event from the debugger interface.
@@ -51,14 +53,18 @@ void receive_next_event()
 
             if (len != 4)
             {
-                log("failed to read next message header: read %z of 4 bytes\n", len);
+                log("failed to read next message header: read %zu of 4 bytes\n", len);
                 adapter::debugger_terminated();
                 return;
             }
 
-            // TODO Reuse existing buffer if it's big enough.
-            next_event.buf_ = std::make_unique<char[]>(next_event.len_);
-
+            // Reuse existing buffer if it's big enough.
+            if (max_event_size < next_event.len_)
+            {
+                next_event.buf_ = std::make_unique<char[]>(next_event.len_);
+                max_event_size = next_event.len_;
+            }
+            
             boost::asio::async_read(*sock, boost::asio::buffer(next_event.buf_.get(), next_event.len_), [](const boost::system::error_code& ec, std::size_t len) {
                 if (ec)
                 {
@@ -69,14 +75,12 @@ void receive_next_event()
 
                 if (len != next_event.len_)
                 {
-                    log("failed to read next message body: received %z of %z bytes\n", len, next_event.len_);
+                    log("failed to read next message body: received %zu of %zu bytes\n", len, next_event.len_);
                     adapter::debugger_terminated();
                     return;
                 }
 
                 dispatch_event(next_event);
-                next_event.buf_.reset();
-                next_event.len_ = 0;
                 receive_next_event();
             });
         });
@@ -96,7 +100,7 @@ void send_next_message()
 
         if (n != 4)
         {
-            log("sending command header truncated: wrote %z of 4 bytes", n);
+            log("sending command header truncated: wrote %zu of 4 bytes", n);
         }
 
         // Now send the message body
@@ -110,7 +114,7 @@ void send_next_message()
 
             if (n != len)
             {
-                log("sending command truncated: wrote %z of %z bytes", n, len);
+                log("sending command truncated: wrote %zu of %zu bytes", n, len);
             }
 
             // If the queue was not empty after removing this just-sent message, schedule the async send of the next message in the queue.

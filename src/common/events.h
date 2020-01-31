@@ -277,6 +277,7 @@ namespace unreal_debugger::serialization::events
             assert(k == event_kind::unlock_list);
             watch_type_ = deserialize_int(raw_buf);
             int count = deserialize_int(raw_buf);
+            watch_info_.reserve(count);
 
             for (int i = 0; i < count; ++i)
             {

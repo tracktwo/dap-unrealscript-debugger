@@ -96,6 +96,8 @@ void debugger_service::unlock_list(int watch_kind)
 
     assert(pending_unlocks_[watch_kind]);
 
+    printf("Unlocking list %d with %zu elements\n", watch_kind, pending_unlocks_[watch_kind]->watch_info_.size());
+
     events::unlock_list unlock = std::move(*pending_unlocks_[watch_kind]);
     pending_unlocks_[watch_kind].reset();
     send_event(unlock);

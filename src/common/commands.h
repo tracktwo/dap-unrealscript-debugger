@@ -97,7 +97,10 @@ namespace unreal_debugger::serialization::commands
 
     struct remove_breakpoint : command
     {
-        remove_breakpoint() : command{ command_kind::remove_breakpoint }
+        remove_breakpoint(const std::string& cls, int ln) :
+            command{ command_kind::remove_breakpoint },
+            class_name_{cls},
+            line_number_{ln}
         {}
 
         remove_breakpoint(const message& msg) : command{ command_kind::remove_breakpoint }

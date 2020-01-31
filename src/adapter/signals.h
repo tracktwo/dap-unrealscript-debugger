@@ -35,5 +35,6 @@ namespace unreal_debugger::client::signals
     extern signal watches_received;
     extern signal breakpoint_hit;
     extern signal user_watches_received;
+    extern signal breakpoint_added;
 }
 

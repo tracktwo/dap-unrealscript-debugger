@@ -6,9 +6,9 @@ namespace unreal_debugger::client
 
 namespace commands = unreal_debugger::serialization::commands;
 
-void remove_breakpoints(const std::string& class_name, int line)
+void remove_breakpoint(const std::string& class_name, int line)
 {
-    throw std::runtime_error("NYI");
+    send_command(commands::remove_breakpoint{ class_name, line });
 }
 
 void stop_debugging()

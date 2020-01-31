@@ -187,10 +187,6 @@ namespace util
         return class_name;
     }
 
-    constexpr int variable_encoding_user_bit = 0x4000'0000;
-    constexpr int variable_encoding_global_bit = 0x2000'0000;
-    constexpr int variable_encoding_frame_shift = 20;
-
     // DAP uses 'variableReferences' to identify scopes and variables within those scopes. These are integer
     // values and must be unique per variable but otherwise have no real meaning to the debugger. We encode
     // the position in the stack frame and watch list in the returned variable reference to make them easy to
@@ -201,28 +197,32 @@ namespace util
     //  Bit 31: always 0
     //  Bit 30: 0 if set, this is a user watch and bit 29 is unset.
     //  Bit 29: 0 for local watch, 1 for global watch
-    //  Bits 28-20: Frame index: 9 bits = 512 possible frames (always 0 for user watches)
-    //  Bits 19-0: Variable index in watch list within frame, + 1: 20 bits, but the 0 value is not used = 1,048,575 possible variables per frame.
+    //  Bits 28-22: Frame index: 7 bits = 128 possible frames (always 0 for user watches)
+    //  Bits 21-0: Variable index in watch list within frame, + 1: 20 bits, but the 0 value is not used = 4,194,303 possible variables per frame.
     //             The variable index is always offset by 1 from the true index within the debugger watch vector. This is
     //             because the value 0 is special to DAP and so we cannot use it to represent the 0th local variable of the 0th stack frame.
     //             Instead simply shift all variable indices to be 1-indexed instead of 0-indexed. This wastes 1 potential variable slot per
-    //             frame when we really only need to special case the first frame, but a million variables is a whole lot anyway.
+    //             frame when we really only need to special case the first frame, but 4 million variables is a whole lot anyway.
+
+    constexpr int variable_encoding_user_bit = 0x4000'0000;
+    constexpr int variable_encoding_global_bit = 0x2000'0000;
+    constexpr int variable_encoding_frame_shift = 22;
+    constexpr int variable_encoding_max_frame = 1 << 7;
+    constexpr int variable_encoding_max_var = (1 << 22) - 1;
+
     int encode_variable_reference(int frame_index, int variable_index, watch_kind kind)
     {
-        constexpr int max_frame = 1 << 9;
-        constexpr int max_var = (1 << 20) - 1;
-
-        if (frame_index >= max_frame)
+        if (frame_index >= variable_encoding_max_frame)
         {
             std::stringstream stream;
-            stream << "encode_variable_reference: frame index " << frame_index << " exceeds maximum value " << max_frame;
+            stream << "encode_variable_reference: frame index " << frame_index << " exceeds maximum value " << variable_encoding_max_frame;
             throw std::runtime_error(stream.str());
         }
 
-        if (variable_index > max_var)
+        if (variable_index > variable_encoding_max_var)
         {
             std::stringstream stream;
-            stream << "encode_variable_reference: variable index " << variable_index << " exceeds maximum value " << max_var;
+            stream << "encode_variable_reference: variable index " << variable_index << " exceeds maximum value " << variable_encoding_max_var;
             throw std::runtime_error(stream.str());
         }
 
@@ -373,6 +373,11 @@ namespace handlers
     {
         dap::SetBreakpointsResponse response;
 
+        if (debugger.get_state() == debugger_state::state::busy)
+        {
+            signals::breakpoint_hit.wait();
+        }
+
         auto breakpoints = request.breakpoints.value({});
 
         // Source references are not supported, we need a source path.
@@ -382,19 +387,34 @@ namespace handlers
         }
 
         std::string class_name = util::source_to_class(request.source);
-        // Clear any existing breakpoints in the file
-        // TODO fetch the list of active breakpoints for this file and remove them.
 
+        // Clear any existing breakpoints in the file
+        if (const std::vector<int>* existing_breakpoints = debugger.get_breakpoints(class_name))
+        {
+            for (int line : *existing_breakpoints)
+            {
+                remove_breakpoint(class_name, line);
+            }
+        }
+        
         response.breakpoints.resize(breakpoints.size());
         for (size_t i = 0; i < breakpoints.size(); i++)
         {
-
-            // TODO add the breakpint to the debugger state. This is needed to properly handle
-            // removal of breakpoints.
+            debugger.set_state(debugger_state::state::waiting_for_add_breakpoint);
             add_breakpoint(class_name, breakpoints[i].line);
-            // We have no real way to know if the breakpoint addition worked, so just say it's good.
-            response.breakpoints[i].verified = true;
-            response.breakpoints[i].line = breakpoints[i].line;
+            signals::breakpoint_added.wait();
+            signals::breakpoint_added.reset();
+            debugger.set_state(debugger_state::state::normal);
+
+            if (const std::vector<int>* list = debugger.get_breakpoints(class_name))
+            {
+                response.breakpoints[i].line = list->back();
+                response.breakpoints[i].verified = true;
+            }
+            else
+            {
+                response.breakpoints[i].verified = false;
+            }
         }
 
         return response;

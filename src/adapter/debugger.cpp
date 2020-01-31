@@ -4,6 +4,8 @@
 #include "debugger.h"
 #include "signals.h"
 
+#include <boost/algorithm/string.hpp>
+
 namespace unreal_debugger::client
 {
 
@@ -60,6 +62,14 @@ void debugger_state::clear_watch(watch_kind kind)
     callstack_[current_frame_].get_watches(kind).emplace_back("ROOT", "N/A", "N/A", -1);
 }
 
+// Ensure there is enough space in the watch list to hold all the watches we are going to add without needing to
+// repeatedly reallocate the vector.
+void debugger_state::reserve_watch_size(watch_kind kind, std::size_t size)
+{
+    watch_list& list = callstack_[current_frame_].get_watches(kind);
+    list.reserve(size);
+}
+
 void debugger_state::add_watch(watch_kind kind, int index, int parent, const std::string& full_name, const std::string& value)
 {
     watch_list& list = callstack_[current_frame_].get_watches(kind);
@@ -78,17 +88,13 @@ void debugger_state::add_watch(watch_kind kind, int index, int parent, const std
         list.reserve(list.capacity() * 2);
     }
 
-    if (list.size() <= index)
-    {
-        list.resize(index + 1, { "<unknown>", "<unknown>", "<unknown>", -1 });
-    }
-
-
     // Parse the watch 'name', which actually includes name info, type info, and address (currently address is not used and is discarded).
     auto [name, type] = split_watch_name(full_name);
 
-    // Insert a new entry for this watch into the list.
-    list[index] = { name, type, value, parent };
+    // Insert a new entry for this watch into the list. We must be inserting at the back and should get the watches in order.
+    assert(list.size() == index);
+
+    list.emplace_back(name, type, value, parent);
 
     // If this has a parent, add this element to the parent's children list for easy access
     if (parent >= 1)
@@ -251,6 +257,42 @@ int debugger_state::find_user_watch(int frame_index, const std::string& var_name
     }
 
     return -1;
+}
+
+void debugger_state::add_breakpoint(const std::string& class_name, int line)
+{
+    std::string upcase = boost::algorithm::to_upper_copy(class_name);
+
+    if (auto it = breakpoints_.find(upcase); it != breakpoints_.end())
+    {
+        // We already have at least one breakpoint in this file. Add another to the list,
+        // ensuring no duplicates. This could be more efficient if we kept the list sorted,
+        // but the set_breakpoints message would then need some way to be able to figure out
+        // which was the last added breakpoint.
+        const std::vector<int>& vec = it->second;
+        if (std::find(vec.begin(), vec.end(), line) == vec.end())
+        {
+            it->second.push_back(line);
+        }
+    }
+    else
+    {
+        // This is the first breakpoint for this file.
+        std::vector<int> vec;
+        vec.push_back(line);
+        breakpoints_[upcase] = std::move(vec);
+    }
+}
+
+const std::vector<int>* debugger_state::get_breakpoints(const std::string& class_name) const
+{
+    std::string upcase = boost::algorithm::to_upper_copy(class_name);
+    if (auto it = breakpoints_.find(upcase); it != breakpoints_.end())
+    {
+        return &it->second;
+    }
+
+    return nullptr;
 }
 
 }
