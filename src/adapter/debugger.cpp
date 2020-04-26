@@ -295,4 +295,14 @@ const std::vector<int>* debugger_state::get_breakpoints(const std::string& class
     return nullptr;
 }
 
+// Remove all breakpoints mapped in the given class.
+void debugger_state::remove_breakpoints(const std::string& class_name)
+{
+    std::string upcase = boost::algorithm::to_upper_copy(class_name);
+    if (auto it = breakpoints_.find(upcase); it != breakpoints_.end())
+    {
+        breakpoints_.erase(it);
+    }
+}
+
 }

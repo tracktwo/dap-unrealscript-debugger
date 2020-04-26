@@ -373,11 +373,6 @@ namespace handlers
     {
         dap::SetBreakpointsResponse response;
 
-        if (debugger.get_state() == debugger_state::state::busy)
-        {
-            signals::breakpoint_hit.wait();
-        }
-
         auto breakpoints = request.breakpoints.value({});
 
         // Source references are not supported, we need a source path.
@@ -388,7 +383,7 @@ namespace handlers
 
         std::string class_name = util::source_to_class(request.source);
 
-        // Clear any existing breakpoints in the file
+        // Tell unreal to clear any existing breakpoints in the file
         if (const std::vector<int>* existing_breakpoints = debugger.get_breakpoints(class_name))
         {
             for (int line : *existing_breakpoints)
@@ -396,6 +391,9 @@ namespace handlers
                 remove_breakpoint(class_name, line);
             }
         }
+
+        // Remove the pre-existing breakpoints from the debugger state before adding the new ones.
+        debugger.remove_breakpoints(class_name);
         
         response.breakpoints.resize(breakpoints.size());
         for (size_t i = 0; i < breakpoints.size(); i++)
@@ -472,11 +470,6 @@ namespace handlers
 
         int count = 0;
         dap::StackTraceResponse response;
-
-        if (debugger.get_state() == debugger_state::state::busy)
-        {
-            signals::breakpoint_hit.wait();
-        }
 
         // Remember what frame we are currently looking at so we can restore it if we need to change it to
         // fetch information here.
@@ -569,11 +562,6 @@ namespace handlers
     // Handle a request for scope information
     dap::ResponseOrError<dap::ScopesResponse> scopes_handler(const dap::ScopesRequest& request)
     {
-        if (debugger.get_state() == debugger_state::state::busy)
-        {
-            signals::breakpoint_hit.wait();
-        }
-
         dap::Scope scope;
         scope.name = "Locals";
         scope.presentationHint = "locals";
@@ -613,11 +601,6 @@ namespace handlers
 
     dap::ResponseOrError<dap::VariablesResponse> variables_handler(const dap::VariablesRequest& request)
     {
-        if (debugger.get_state() == debugger_state::state::busy)
-        {
-            signals::breakpoint_hit.wait();
-        }
-
         auto [frame_index, variable_index, watch_kind] = util::decode_variable_reference(request.variablesReference);
 
         // If we don't have watch info for this frame yet we need to collect it now.
@@ -750,7 +733,6 @@ namespace handlers
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.
         debugger.set_current_frame_index(0);
-        debugger.set_state(debugger_state::state::busy);
         signals::breakpoint_hit.reset();
         go();
         return {};
@@ -767,7 +749,6 @@ namespace handlers
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.
         debugger.set_current_frame_index(0);
-        debugger.set_state(debugger_state::state::busy);
         signals::breakpoint_hit.reset();
         step_over();
         return {};
@@ -784,7 +765,6 @@ namespace handlers
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.
         debugger.set_current_frame_index(0);
-        debugger.set_state(debugger_state::state::busy);
         signals::breakpoint_hit.reset();
         client::step_into();
         return {};
@@ -801,7 +781,6 @@ namespace handlers
         // Any code execution change results in fresh information from unreal so we need to reset
         // to the top-most frame.
         debugger.set_current_frame_index(0);
-        debugger.set_state(debugger_state::state::busy);
         signals::breakpoint_hit.reset();
         client::step_outof();
         return {};
@@ -821,9 +800,6 @@ void breakpoint_hit()
 {
     if (!session)
         return;
-
-    if (debugger.get_state() == debugger_state::state::busy)
-        debugger.set_state(debugger_state::state::normal);
 
     signals::breakpoint_hit.fire();
 

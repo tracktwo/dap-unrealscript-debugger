@@ -54,7 +54,6 @@ public:
     enum class state
     {
         normal,
-        busy,
         waiting_for_frame_line,
         waiting_for_frame_watches,
         waiting_for_user_watches,
@@ -84,6 +83,7 @@ public:
     size_t callstack_size() const { return callstack_.size(); }
 
     void add_breakpoint(const std::string& class_name, int line);
+    void remove_breakpoints(const std::string& class_name);
     const std::vector<int>* get_breakpoints(const std::string& class_name) const;
 
     void finalize_callstack();
