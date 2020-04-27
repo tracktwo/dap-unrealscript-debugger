@@ -1,2 +1,9 @@
 build/
 .vs/
+.vscode/
+out/
+extensions/visual_studio/UnrealScriptDebuggerAdapter/adapter
+extensions/visual_studio/UnrealScriptDebuggerAdapter/bin
+extensions/visual_studio/UnrealScriptDebuggerAdapter/obj
+extensions/vscode/DebuggerAdapter.exe
+CMakeSettings.json
