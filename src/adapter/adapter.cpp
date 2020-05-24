@@ -297,6 +297,24 @@ namespace util
 
         return bad_roots;
     }
+
+    // Convert an iso8859-1 string to utf-8.
+    std::string iso8859_1_to_utf8(const std::string& in)
+    {
+        std::string out;
+
+        for (size_t i = 0; i < in.length(); ++i) {
+            unsigned char p = static_cast<unsigned char>(in[i]);
+            if (p < 0x80) {
+                out += static_cast<char>(p);
+            }
+            else {
+                out += static_cast<char>(0xc0 | (p >> 6));
+                out += static_cast<char>(0x80 | (p & 0x3f));
+            }
+        }
+        return out;
+    }
 }
 
 namespace handlers
@@ -628,9 +646,15 @@ namespace handlers
             {
                 const watch_data& watch = watch_list[child_index];
                 dap::Variable var;
+                // TODO Can the name be non-ASCII? Not sure if unrealscript supports this directly.
                 var.name = watch.name;
                 var.type = watch.type;
-                var.value = watch.value;
+
+                // TODO Support other game locales.
+                // The variable value sent from Unreal will be encoded in the game character set. For INT
+                // this is iso8859-1 and may contain accented characters that need to be converted to
+                // UTF-8 prior to sending to DAP or it will throw exceptions encoding the JSON message.
+                var.value = util::iso8859_1_to_utf8(watch.value);
 
                 // If this variable has no children then we report its variable reference as 0. Otherwise
                 // we report this variable's index and the client will send a new variable request with this
@@ -816,7 +840,11 @@ void console_message(const std::string& msg)
         return;
 
     dap::OutputEvent ev;
-    ev.output = msg + "\r\n";
+    // TODO Support other game locales
+    // The message sent from Unreal will be encoded in the game character set. For INT
+    // this is iso8859-1 and may contain accented characters that need to be converted to
+    // UTF-8 prior to sending to DAP or it will throw exceptions encoding the JSON message.
+    ev.output = util::iso8859_1_to_utf8(msg) + "\r\n";
     ev.category = "console";
     session->send(ev);
 }

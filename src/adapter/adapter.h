@@ -1,6 +1,7 @@
 
 #pragma once
 // Interface into the DAP adapter to communicate with the client UI.
+#include <string>
 
 namespace unreal_debugger::adapter
 {
