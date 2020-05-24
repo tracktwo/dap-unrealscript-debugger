@@ -4,7 +4,7 @@
     "description": "Debugger for UnrealScript",
     "version": "0.1.0",
     "preview": true,
-    "publisher": "X2 Community Project",
+    "publisher": "x2-community-project",
     "author": {
         "name": "X2 Community Project"
     },
@@ -15,18 +15,25 @@
     "categories": [
         "Debuggers"
     ],
-
+    "activationEvents": [
+        "*"
+    ],
+    "main": "./out/extension.js",
     "contributes": {
         "debuggers": [
             {
                 "type": "unrealscript",
                 "program": "DebuggerAdapter.exe",
                 "label": "Unrealscript debug",
-                "languages": [ "unrealscript", "uc" ],
-
+                "languages": [
+                    "unrealscript",
+                    "uc"
+                ],
                 "configurationAttributes": {
                     "attach": {
-                        "required": [ "sourceRoots" ],
+                        "required": [
+                            "sourceRoots"
+                        ],
                         "properties": {
                             "sourceRoots": {
                                 "type": "array",
@@ -41,6 +48,19 @@
             {
                 "language": "unrealscript"
             }
+        ],
+        "commands": [
+            {
+                "command": "extension.unrealscript-debugger-install-interface",
+                "title": "Install UnrealScript Debugger Interface",
+                "category": "UnrealScript Debugger"
+            }
         ]
+    },
+    "scripts": {
+        "compile": "tsc -p ."
+    },
+    "devDependencies": {
+        "@types/vscode": "^1.42.0"
     }
 }
