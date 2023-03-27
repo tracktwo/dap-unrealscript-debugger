@@ -1,4 +1,4 @@
-
+**Archived**: This repository is archived and not under development. It's been replaced by [this implementation](https://github.com/tracktwo/unrealscript-debugger).
 
 # DAP UnrealScript Debugger
 
